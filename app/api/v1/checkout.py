@@ -1,0 +1,234 @@
+from decimal import Decimal
+from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.exceptions import ForbiddenError, ValidationError
+from app.schemas.order import CheckoutConfirmRequest, CreatePaymentIntentRequest, OrderOut
+from app.services.cart_service import CartService
+from app.services.order_service import OrderService
+from app.services.payment_service import PaymentService
+
+router = APIRouter(prefix="/checkout", tags=["checkout"])
+
+
+# ── Stripe: create payment intent ─────────────────────────────────────────────
+
+@router.post("/intent")
+async def create_payment_intent(
+    payload: CreatePaymentIntentRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create Stripe PaymentIntent for current cart total."""
+    company_id = getattr(request.state, "company_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+
+    discount_percent = getattr(request.state, "tier_discount_percent", Decimal("0"))
+    cart_svc = CartService(db)
+    cart = await cart_svc.get_cart_with_pricing(company_id, discount_percent)
+
+    if not cart.items:
+        raise ValidationError("Cart is empty")
+
+    if not cart.validation.is_valid:
+        raise ValidationError("Cart validation failed — check MOQ and MOV requirements")
+
+    total = cart.subtotal + cart.validation.estimated_shipping
+    payment_svc = PaymentService(db)
+    intent = await payment_svc.create_payment_intent(
+        amount_decimal=total,
+        metadata={"company_id": str(company_id)},
+    )
+
+    return {
+        "client_secret": intent.client_secret,
+        "payment_intent_id": intent.id,
+        "amount": total,
+    }
+
+
+# ── QB Payments: server-side tokenize ────────────────────────────────────────
+
+@router.post("/tokenize")
+async def tokenize_card(
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tokenize raw card data via QB Payments API and auto-save card to QB customer wallet.
+
+    Expected payload: { card: { number, expMonth, expYear, cvc, name (opt), address: { postalCode } (opt) } }
+    Returns: { "token": "<qb_one_time_token>" }
+
+    ⚠ Production recommendation: use QB.js on the client to tokenize and skip
+    this endpoint — it reduces PCI scope to SAQ A.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    company_id = getattr(request.state, "company_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+
+    _log.info("tokenize_card called — company: %s (card save runs here, not at confirm)", company_id)
+
+    from app.services.qb_payments_service import QBPaymentsService
+    qb_pay = QBPaymentsService()
+    try:
+        card = payload["card"]
+        token = qb_pay.create_token(
+            card_number=card["number"],
+            exp_month=card["expMonth"],
+            exp_year=card["expYear"],
+            cvc=card["cvc"],
+            name=card.get("name"),
+            postal_code=card.get("address", {}).get("postalCode"),
+        )
+    except KeyError as exc:
+        raise ValidationError(f"Missing required card field: {exc}") from exc
+    except RuntimeError as exc:
+        raise ValidationError(str(exc)) from exc
+
+    # Auto-save card to QB customer wallet (raw card data is available here)
+    try:
+        from sqlalchemy import select as _select
+        from app.models.company import Company as _Company
+        company = (await db.execute(
+            _select(_Company).where(_Company.id == company_id)
+        )).scalar_one_or_none()
+        _log.info("Card save attempt — company: %s, qb_customer_id: %s", company_id, company.qb_customer_id if company else None)
+        if company:
+            if not company.qb_customer_id:
+                qb_cust_id = qb_pay.create_customer(str(company_id))
+                company.qb_customer_id = qb_cust_id
+                await db.flush()
+                _log.info("QB Payments customer created: %s", qb_cust_id)
+            if company.qb_customer_id:
+                saved = qb_pay.save_card(
+                    customer_id=company.qb_customer_id,
+                    card_number=card["number"],
+                    exp_month=card["expMonth"],
+                    exp_year=card["expYear"],
+                    cvc=card["cvc"],
+                    name=card.get("name"),
+                )
+                _log.info("Card save SUCCESS for company %s — card_id: %s", company_id, saved.get("id"))
+                if saved.get("id") and not company.default_payment_method_id:
+                    company.default_payment_method_id = saved["id"]
+                await db.commit()
+    except Exception as _exc:
+        _log.warning("Card save FAILED for company %s: %s: %s", company_id, type(_exc).__name__, _exc)
+
+    return {"token": token}
+
+
+# ── Confirm order (QB Payments or Stripe) ─────────────────────────────────────
+
+@router.post("/confirm", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
+async def confirm_checkout(
+    payload: CheckoutConfirmRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create order after payment authorisation.
+
+    Supports two payment flows:
+    - QB Payments: provide qb_token (one-time) or saved_card_id.
+    - Stripe (legacy): provide payment_intent_id.
+
+    Note: card auto-save happens at POST /checkout/tokenize (not here).
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    company_id = getattr(request.state, "company_id", None)
+    user_id = getattr(request.state, "user_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+
+    _log.info(
+        "confirm_checkout called — company: %s, fields_set: %s",
+        company_id,
+        payload.__fields_set__,
+    )
+    _log.info(
+        "confirm_checkout payment — qb_token: %s, saved_card_id: %s, payment_intent_id: %s",
+        bool(payload.qb_token),
+        bool(payload.saved_card_id),
+        bool(payload.payment_intent_id),
+    )
+
+    # Validate: at least one payment method supplied
+    has_qb = bool(payload.qb_token or payload.saved_card_id)
+    has_stripe = bool(payload.payment_intent_id)
+    if not has_qb and not has_stripe:
+        raise ValidationError(
+            "Payment required: supply qb_token, saved_card_id, or payment_intent_id"
+        )
+
+    discount_percent = getattr(request.state, "tier_discount_percent", Decimal("0"))
+
+    # ── QB Payments flow ──────────────────────────────────────────────────────
+    qb_charge_id: str | None = None
+    qb_payment_status: str | None = None
+
+    if has_qb:
+        from app.services.cart_service import CartService as _CartService
+        from app.services.qb_payments_service import QBPaymentsService
+
+        cart_svc = _CartService(db)
+        cart = await cart_svc.get_cart_with_pricing(company_id, discount_percent)
+        if not cart.items:
+            raise ValidationError("Cart is empty")
+        if not cart.validation.is_valid:
+            raise ValidationError("Cart validation failed — check MOQ and MOV requirements")
+
+        total_float = float(cart.subtotal + cart.validation.estimated_shipping)
+
+        qb_pay = QBPaymentsService()
+        try:
+            if payload.saved_card_id:
+                # Saved card — look up QB customer ID from DB (frontend doesn't need to pass it)
+                from sqlalchemy import select as _select
+                from app.models.company import Company as _Company
+                company = (await db.execute(
+                    _select(_Company).where(_Company.id == company_id)
+                )).scalar_one_or_none()
+                qb_cust_id = payload.qb_customer_id or (company.qb_customer_id if company else None)
+                if not qb_cust_id:
+                    raise ValidationError(
+                        "No QB Payments profile found. Complete a checkout with a new card first."
+                    )
+                charge_resp = qb_pay.charge_saved_card(
+                    customer_id=qb_cust_id,
+                    card_id=payload.saved_card_id,
+                    amount=total_float,
+                    description=f"AF Apparels order — company {company_id}",
+                )
+            else:
+                charge_resp = qb_pay.charge_card(
+                    token=payload.qb_token,  # type: ignore[arg-type]
+                    amount=total_float,
+                    description=f"AF Apparels order — company {company_id}",
+                )
+        except RuntimeError as exc:
+            raise ValidationError(f"Payment failed: {exc}") from exc
+
+        qb_charge_id = charge_resp.get("id")
+        qb_payment_status = charge_resp.get("status", "UNKNOWN")
+
+
+    # ── Create order record ───────────────────────────────────────────────────
+    order_svc = OrderService(db)
+    order = await order_svc.create_order(
+        company_id=company_id,
+        user_id=user_id,
+        confirm=payload,
+        discount_percent=discount_percent,
+        qb_charge_id=qb_charge_id,
+        qb_payment_status=qb_payment_status,
+    )
+    await db.commit()
+    return order

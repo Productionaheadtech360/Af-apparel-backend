@@ -1,0 +1,368 @@
+"""CartService — manages CartItem records and validates MOQ/MOV requirements."""
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
+from app.core.exceptions import NotFoundError, ValidationError
+from app.models.order import CartItem, OrderTemplate
+from app.models.product import Product, ProductVariant
+from app.models.inventory import InventoryRecord
+from app.schemas.cart import CartItemOut, CartResponse, CartValidation, MatrixAddRequest
+
+
+class CartService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    # ------------------------------------------------------------------
+    # Read cart
+    # ------------------------------------------------------------------
+
+    async def get_cart_with_pricing(
+        self,
+        company_id: UUID,
+        discount_percent: Decimal = Decimal("0"),
+    ) -> CartResponse:
+        items = await self._load_cart_items(company_id, discount_percent)
+        subtotal = sum(i.line_total for i in items)
+        total_units = sum(i.quantity for i in items)
+        validation = await self._validate(items, total_units, subtotal, company_id)
+        return CartResponse(
+            items=items,
+            subtotal=subtotal,
+            item_count=len(items),
+            total_units=total_units,
+            validation=validation,
+        )
+
+    # ------------------------------------------------------------------
+    # Add matrix items (US-3)
+    # ------------------------------------------------------------------
+
+    async def add_matrix_items(
+        self,
+        company_id: UUID,
+        payload: MatrixAddRequest,
+        discount_percent: Decimal = Decimal("0"),
+    ) -> CartResponse:
+        from app.services.pricing_service import PricingService
+
+        pricing_svc = PricingService(self.db)
+
+        for add_item in payload.items:
+            variant_result = await self.db.execute(
+                select(ProductVariant).where(ProductVariant.id == add_item.variant_id)
+            )
+            variant = variant_result.scalar_one_or_none()
+            if not variant:
+                raise NotFoundError(f"Variant {add_item.variant_id} not found")
+
+            effective_price = pricing_svc.calculate_effective_price(
+                variant.retail_price, discount_percent
+            )
+
+            # Upsert: add to existing quantity if item already in cart
+            existing_result = await self.db.execute(
+                select(CartItem).where(
+                    CartItem.company_id == company_id,
+                    CartItem.variant_id == add_item.variant_id,
+                )
+            )
+            existing = existing_result.scalar_one_or_none()
+
+            if existing:
+                existing.quantity += add_item.quantity
+                existing.unit_price = effective_price
+            else:
+                cart_item = CartItem(
+                    company_id=company_id,
+                    variant_id=add_item.variant_id,
+                    quantity=add_item.quantity,
+                    unit_price=effective_price,
+                )
+                self.db.add(cart_item)
+
+        await self.db.flush()
+        return await self.get_cart_with_pricing(company_id, discount_percent)
+
+    # ------------------------------------------------------------------
+    # Update item quantity
+    # ------------------------------------------------------------------
+
+    async def update_item_quantity(
+        self,
+        company_id: UUID,
+        item_id: UUID,
+        quantity: int,
+        discount_percent: Decimal = Decimal("0"),
+    ) -> CartResponse:
+        result = await self.db.execute(
+            select(CartItem).where(
+                CartItem.id == item_id, CartItem.company_id == company_id
+            )
+        )
+        item = result.scalar_one_or_none()
+        if not item:
+            raise NotFoundError(f"Cart item {item_id} not found")
+
+        item.quantity = quantity
+        await self.db.flush()
+        return await self.get_cart_with_pricing(company_id, discount_percent)
+
+    # ------------------------------------------------------------------
+    # Remove item
+    # ------------------------------------------------------------------
+
+    async def remove_item(
+        self,
+        company_id: UUID,
+        item_id: UUID,
+        discount_percent: Decimal = Decimal("0"),
+    ) -> CartResponse:
+        await self.db.execute(
+            delete(CartItem).where(
+                CartItem.id == item_id, CartItem.company_id == company_id
+            )
+        )
+        await self.db.flush()
+        return await self.get_cart_with_pricing(company_id, discount_percent)
+
+    # ------------------------------------------------------------------
+    # Clear cart
+    # ------------------------------------------------------------------
+
+    async def clear_cart(self, company_id: UUID) -> None:
+        await self.db.execute(
+            delete(CartItem).where(CartItem.company_id == company_id)
+        )
+        await self.db.flush()
+
+    # ------------------------------------------------------------------
+    # Validate cart (MOQ + MOV) (T081 — Phase 8)
+    # ------------------------------------------------------------------
+
+    async def validate_cart(self, company_id: UUID) -> CartValidation:
+        items = await self._load_cart_items(company_id)
+        total_units = sum(i.quantity for i in items)
+        subtotal = sum(i.line_total for i in items)
+        return await self._validate(items, total_units, subtotal, company_id)
+
+    # ------------------------------------------------------------------
+    # Save as template (T082 — Phase 8)
+    # ------------------------------------------------------------------
+
+    async def save_as_template(
+        self, company_id: UUID, user_id: UUID, name: str
+    ) -> OrderTemplate:
+        items = await self._load_cart_items(company_id)
+        if not items:
+            raise ValidationError("Cart is empty")
+
+        template_items = [
+            {"variant_id": str(i.variant_id), "quantity": i.quantity}
+            for i in items
+        ]
+        import json
+
+        template = OrderTemplate(
+            company_id=company_id,
+            created_by_id=user_id,
+            name=name,
+            items=json.dumps(template_items),
+        )
+        self.db.add(template)
+        await self.db.flush()
+        await self.db.refresh(template)
+        return template
+
+    # ------------------------------------------------------------------
+    # Quick order: validate SKU list (T139 — Phase 14)
+    # ------------------------------------------------------------------
+
+    async def validate_sku_list(self, skus: list[dict]) -> dict:
+        valid, invalid, insufficient = [], [], []
+
+        for entry in skus:
+            sku = entry["sku"]
+            qty = entry["quantity"]
+
+            result = await self.db.execute(
+                select(ProductVariant).where(ProductVariant.sku == sku)
+            )
+            variant = result.scalar_one_or_none()
+
+            if not variant:
+                invalid.append({"sku": sku, "quantity": qty, "status": "not_found"})
+                continue
+
+            stock_result = await self.db.execute(
+                select(func.coalesce(func.sum(InventoryRecord.quantity), 0)).where(
+                    InventoryRecord.variant_id == variant.id
+                )
+            )
+            stock = stock_result.scalar_one()
+
+            if stock < qty:
+                insufficient.append({
+                    "sku": sku,
+                    "quantity": qty,
+                    "status": "insufficient_stock",
+                    "available_quantity": stock,
+                    "variant_id": str(variant.id),
+                })
+            else:
+                valid.append({
+                    "sku": sku,
+                    "quantity": qty,
+                    "status": "valid",
+                    "variant_id": str(variant.id),
+                })
+
+        return {"valid": valid, "invalid": invalid, "insufficient_stock": insufficient}
+
+    async def bulk_add_validated_items(
+        self,
+        company_id: UUID,
+        valid_items: list[dict],
+        discount_percent: Decimal = Decimal("0"),
+    ) -> int:
+        """Upsert all valid items into cart. Returns count of items added."""
+        added = 0
+        for item in valid_items:
+            variant_id = UUID(item["variant_id"]) if isinstance(item["variant_id"], str) else item["variant_id"]
+            qty = item["quantity"]
+            existing = (await self.db.execute(
+                select(CartItem).where(
+                    CartItem.company_id == company_id,
+                    CartItem.variant_id == variant_id,
+                )
+            )).scalar_one_or_none()
+            if existing:
+                existing.quantity += qty
+            else:
+                self.db.add(CartItem(
+                    company_id=company_id,
+                    variant_id=variant_id,
+                    quantity=qty,
+                ))
+            added += 1
+        await self.db.flush()
+        return added
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _load_cart_items(
+        self,
+        company_id: UUID,
+        discount_percent: Decimal = Decimal("0"),
+    ) -> list[CartItemOut]:
+        result = await self.db.execute(
+            select(CartItem).where(CartItem.company_id == company_id)
+        )
+        raw_items = result.scalars().all()
+
+        items: list[CartItemOut] = []
+        for item in raw_items:
+            # Load variant + product info
+            variant_result = await self.db.execute(
+                select(ProductVariant, Product)
+                .join(Product, ProductVariant.product_id == Product.id)
+                .where(ProductVariant.id == item.variant_id)
+            )
+            row = variant_result.first()
+            if not row:
+                continue
+            variant, product = row
+
+            # Stock
+            stock_result = await self.db.execute(
+                select(func.coalesce(func.sum(InventoryRecord.quantity), 0)).where(
+                    InventoryRecord.variant_id == variant.id
+                )
+            )
+            stock = stock_result.scalar_one()
+
+            line_total = item.unit_price * item.quantity
+            moq_satisfied = item.quantity >= product.moq
+
+            items.append(
+                CartItemOut(
+                    id=item.id,
+                    variant_id=item.variant_id,
+                    product_id=product.id,
+                    product_name=product.name,
+                    sku=variant.sku,
+                    color=variant.color,
+                    size=variant.size,
+                    quantity=item.quantity,
+                    unit_price=item.unit_price,
+                    line_total=line_total,
+                    moq=product.moq,
+                    moq_satisfied=moq_satisfied,
+                    stock_quantity=stock,
+                )
+            )
+        return items
+
+    async def _validate(
+        self,
+        items: list[CartItemOut],
+        total_units: int,
+        subtotal: Decimal,
+        company_id: UUID,
+    ) -> CartValidation:
+        settings = get_settings()
+
+        # MOQ violations
+        moq_violations = [
+            {
+                "variant_id": str(i.variant_id),
+                "sku": i.sku,
+                "required": i.moq,
+                "current": i.quantity,
+            }
+            for i in items
+            if not i.moq_satisfied
+        ]
+
+        # MOV check
+        mov_required = Decimal(str(getattr(settings, "MOV_AMOUNT", "0")))
+        mov_violation = subtotal < mov_required
+
+        # Shipping estimate
+        estimated_shipping = Decimal("0")
+        if items:
+            try:
+                from app.models.company import Company
+                from app.services.shipping_service import ShippingService
+                from sqlalchemy.orm import selectinload
+
+                company_result = await self.db.execute(
+                    select(Company)
+                    .options(selectinload(Company.shipping_tier))
+                    .where(Company.id == company_id)
+                )
+                company = company_result.scalar_one_or_none()
+                if company and company.shipping_tier:
+                    svc = ShippingService(self.db)
+                    estimated_shipping = svc.calculate_shipping_cost(
+                        total_units,
+                        company.shipping_tier,
+                        company.shipping_override_amount,
+                    )
+            except Exception:
+                pass
+
+        return CartValidation(
+            is_valid=not moq_violations and not mov_violation,
+            moq_violations=moq_violations,
+            mov_violation=mov_violation,
+            mov_required=mov_required,
+            mov_current=subtotal,
+            estimated_shipping=estimated_shipping,
+        )
