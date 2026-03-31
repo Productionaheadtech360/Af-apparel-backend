@@ -1,3 +1,4 @@
+# backend/app/core/config.py
 """Application configuration loaded from environment variables via Pydantic Settings."""
 from functools import lru_cache
 from typing import Literal
@@ -31,7 +32,18 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str  # asyncpg URL
-    DATABASE_URL_SYNC: str  # psycopg2 URL (for Alembic)
+    DATABASE_URL_SYNC: str = ""  # psycopg2 URL — auto-derived from DATABASE_URL if not set
+
+    @property
+    def sync_db_url(self) -> str:
+        """Synchronous DB URL for Alembic — auto-derived from async URL if not set."""
+        if self.DATABASE_URL_SYNC:
+            return self.DATABASE_URL_SYNC
+        return (
+            self.DATABASE_URL
+            .replace("postgresql+asyncpg://", "postgresql://")
+            .replace("postgres+asyncpg://", "postgresql://")
+        )
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
