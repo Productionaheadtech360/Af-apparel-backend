@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # ── Application ───────────────────────────────────────────────────────────
     APP_ENV: Literal["development", "test", "staging", "production"] = "development"
-    APP_SECRET_KEY: str
+    APP_SECRET_KEY: str = "dev-secret-key-change-in-production"
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000"
 
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
     # ── JWT ───────────────────────────────────────────────────────────────────
-    JWT_SECRET_KEY: str
+    JWT_SECRET_KEY: str = "dev-jwt-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
