@@ -26,9 +26,17 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]
 
     # ── Cookie ────────────────────────────────────────────────────────────────
-    COOKIE_SECURE: bool = False       # Set True in production (HTTPS)
-    COOKIE_DOMAIN: str | None = None  # e.g. ".railway.app" for cross-subdomain
-    COOKIE_SAMESITE: str = "lax"      # "none" for cross-domain (Railway + Vercel)
+    COOKIE_SECURE: bool = False       # Set True in production (HTTPS required for SameSite=none)
+    COOKIE_DOMAIN: str | None = None  # Leave empty/unset for Railway; omits Domain attribute
+    COOKIE_SAMESITE: str = "lax"      # "none" for cross-domain (Railway backend + Vercel frontend)
+
+    @field_validator("COOKIE_DOMAIN", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: object) -> object:
+        """Coerce empty string to None so set_cookie omits the Domain attribute."""
+        if v == "":
+            return None
+        return v
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str  # asyncpg URL

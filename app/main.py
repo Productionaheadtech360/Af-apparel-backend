@@ -115,7 +115,11 @@ app.add_middleware(PricingMiddleware)
 # any other middleware can short-circuit the request.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
+    allow_origins=list({
+        "http://localhost:3000",
+        settings.FRONTEND_URL,
+        *settings.allowed_origins_list,
+    }),
     # Wildcard for all Vercel preview + production deployments
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
