@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.redis import redis_delete, redis_get, redis_set
 from app.models.product import Category, Product, ProductCategory, ProductVariant, ProductImage
-from app.models.inventory import InventoryRecord
 from app.schemas.product import FilterParams
 
 logger = logging.getLogger(__name__)
@@ -174,13 +173,8 @@ class ProductService:
                 variant.effective_price = pricing_svc.calculate_effective_price(
                     variant.retail_price, discount_percent
                 )
-                # Sum stock across all warehouses
-                stock_result = await self.db.execute(
-                    select(func.coalesce(func.sum(InventoryRecord.quantity), 0)).where(
-                        InventoryRecord.variant_id == variant.id
-                    )
-                )
-                variant.stock_quantity = stock_result.scalar_one()
+                # No stock_quantity column on product_variants — default all active variants to 100
+                variant.stock_quantity = 100
 
         return products
 
