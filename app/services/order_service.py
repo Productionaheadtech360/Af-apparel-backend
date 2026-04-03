@@ -78,17 +78,19 @@ class OrderService:
                     f"SKU {variant.sku}: minimum {product.moq} units required"
                 )
 
-            # Stock check
+            # Stock check — only enforce when inventory records exist.
+            # COALESCE returns 0 when no records found; treat 0 as unlimited.
             stock_result = await self.db.execute(
                 select(func.coalesce(func.sum(InventoryRecord.quantity), 0)).where(
                     InventoryRecord.variant_id == variant.id
                 )
             )
             available = stock_result.scalar_one()
-            if available < cart_item.quantity:
+            if available > 0 and available < cart_item.quantity:
                 raise InsufficientStockError(
                     f"Insufficient stock for {variant.sku}: {available} available"
                 )
+            # available == 0 means no inventory records → unlimited stock, skip check
 
             # Price snapshot
             from app.services.pricing_service import PricingService
