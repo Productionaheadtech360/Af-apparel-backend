@@ -15,6 +15,8 @@ from app.models.product import Category, Product, ProductCategory, ProductImage,
 from app.schemas.product import (
     BulkActionRequest,
     BulkGenerateRequest,
+    CategoryCreate,
+    CategoryOut,
     ImageUploadResponse,
     ImportResult,
     ProductCreate,
@@ -223,26 +225,29 @@ async def update_variant(
     return {"id": str(variant.id), "sku": variant.sku}
 
 
-@router.post("/categories", status_code=201)
+@router.post("/categories", response_model=CategoryOut, status_code=201)
 async def create_category(
-    payload: dict = Body(...),
+    payload: CategoryCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.schemas.product import CategoryOut as _CategoryOut
+    existing = await db.execute(select(Category).where(Category.slug == payload.slug))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Slug already exists")
 
-    name = payload.get("name", "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name is required")
-
-    slug = payload.get("slug") or name.lower().replace(" ", "-")
-    cat = Category(name=name, slug=slug, description=payload.get("description"))
+    cat = Category(
+        name=payload.name,
+        slug=payload.slug,
+        description=payload.description,
+        parent_id=payload.parent_id,
+        sort_order=payload.sort_order,
+    )
     db.add(cat)
     await db.commit()
     await db.refresh(cat)
-    return {"id": str(cat.id), "name": cat.name, "slug": cat.slug, "description": cat.description, "is_active": cat.is_active}
+    return cat
 
 
-@router.patch("/categories/{category_id}")
+@router.patch("/categories/{category_id}", response_model=CategoryOut)
 async def update_category(
     category_id: UUID,
     payload: dict = Body(...),
@@ -252,12 +257,12 @@ async def update_category(
     cat = result.scalar_one_or_none()
     if not cat:
         raise NotFoundError("Category not found")
-    for field in ("name", "slug", "description", "is_active"):
+    for field in ("name", "slug", "description", "is_active", "sort_order"):
         if field in payload:
             setattr(cat, field, payload[field])
     await db.commit()
     await db.refresh(cat)
-    return {"id": str(cat.id), "name": cat.name, "slug": cat.slug, "description": cat.description, "is_active": cat.is_active}
+    return cat
 
 
 @router.delete("/categories/{category_id}", status_code=204)

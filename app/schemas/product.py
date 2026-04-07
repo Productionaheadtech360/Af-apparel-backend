@@ -13,12 +13,23 @@ class CategoryOut(BaseModel):
     id: UUID
     name: str
     slug: str
-    parent_id: UUID | None
+    description: str | None = None
+    parent_id: UUID | None = None
+    sort_order: int = 0
+    is_active: bool = True
     children: list["CategoryOut"] = []
 
     model_config = {"from_attributes": True}
 
 CategoryOut.model_rebuild()
+
+
+class CategoryCreate(BaseModel):
+    name: str
+    slug: str
+    description: str | None = None
+    parent_id: UUID | None = None
+    sort_order: int = 0
 
 
 # ---------------------------------------------------------------------------

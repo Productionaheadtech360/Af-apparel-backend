@@ -113,18 +113,16 @@ app.add_middleware(PricingMiddleware)
 # CORS must be added LAST so it becomes the OUTERMOST middleware (runs first on
 # request). This ensures preflight OPTIONS responses include CORS headers before
 # any other middleware can short-circuit the request.
+_cors_origins = list({settings.FRONTEND_URL, *settings.allowed_origins_list} - {""})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list({
-        "http://localhost:3000",
-        settings.FRONTEND_URL,
-        *settings.allowed_origins_list,
-    }),
+    allow_origins=_cors_origins,
     # Wildcard for all Vercel preview + production deployments
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 _V1 = "/api/v1"
