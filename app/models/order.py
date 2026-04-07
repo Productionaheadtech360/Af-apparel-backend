@@ -1,8 +1,9 @@
 """Order, OrderItem, CartItem, AbandonedCart, OrderTemplate models."""
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,6 +65,9 @@ class Order(BaseModel):
     # Shipping
     tracking_number: Mapped[str | None] = mapped_column(String(255))
     carrier: Mapped[str | None] = mapped_column(String(100))
+    courier: Mapped[str | None] = mapped_column(String(100))
+    courier_service: Mapped[str | None] = mapped_column(String(100))
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # QuickBooks Payments
     qb_payment_charge_id: Mapped[str | None] = mapped_column(String(255), index=True)

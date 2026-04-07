@@ -21,6 +21,8 @@ from app.schemas.product import (
     ProductDetail,
     ProductListItem,
     ProductUpdate,
+    VariantCreate,
+    VariantOut,
 )
 from app.services.product_service import ProductService
 
@@ -39,9 +41,10 @@ async def list_admin_products(
 ):
     svc = ProductService(db)  # noqa: F841
     from sqlalchemy.orm import selectinload
+    from app.models.inventory import InventoryRecord
 
     query = select(Product).options(
-        selectinload(Product.variants),
+        selectinload(Product.variants).selectinload(ProductVariant.inventory_records),
         selectinload(Product.images),
         selectinload(Product.category_links)
         .selectinload(ProductCategory.category)
@@ -54,7 +57,16 @@ async def list_admin_products(
     query = query.offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(query)
-    return result.scalars().all()
+    products = result.scalars().all()
+
+    # Populate stock_quantity on each variant from inventory records
+    for product in products:
+        for variant in product.variants:
+            variant.stock_quantity = sum(
+                rec.quantity for rec in variant.inventory_records if rec.quantity > 0
+            )
+
+    return products
 
 
 @router.post("", response_model=ProductDetail, status_code=status.HTTP_201_CREATED)
@@ -146,6 +158,34 @@ async def reorder_product_images(
     return {"reordered": len(image_ids)}
 
 
+@router.post("/{product_id}/variants", response_model=VariantOut, status_code=201)
+async def add_variant(
+    product_id: UUID,
+    payload: VariantCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a single variant to a product."""
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise NotFoundError(f"Product {product_id} not found")
+
+    variant = ProductVariant(
+        product_id=product_id,
+        sku=payload.sku,
+        color=payload.color,
+        size=payload.size,
+        retail_price=payload.retail_price,
+        compare_price=payload.compare_price,
+        status=payload.status,
+    )
+    db.add(variant)
+    await db.commit()
+    await db.refresh(variant)
+    variant.stock_quantity = 0
+    return variant
+
+
 @router.post("/{product_id}/variants/bulk-generate")
 async def bulk_generate_variants(
     product_id: UUID, payload: BulkGenerateRequest, db: AsyncSession = Depends(get_db)
@@ -183,6 +223,53 @@ async def update_variant(
     return {"id": str(variant.id), "sku": variant.sku}
 
 
+@router.post("/categories", status_code=201)
+async def create_category(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.schemas.product import CategoryOut as _CategoryOut
+
+    name = payload.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+
+    slug = payload.get("slug") or name.lower().replace(" ", "-")
+    cat = Category(name=name, slug=slug, description=payload.get("description"))
+    db.add(cat)
+    await db.commit()
+    await db.refresh(cat)
+    return {"id": str(cat.id), "name": cat.name, "slug": cat.slug, "description": cat.description, "is_active": cat.is_active}
+
+
+@router.patch("/categories/{category_id}")
+async def update_category(
+    category_id: UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Category).where(Category.id == category_id))
+    cat = result.scalar_one_or_none()
+    if not cat:
+        raise NotFoundError("Category not found")
+    for field in ("name", "slug", "description", "is_active"):
+        if field in payload:
+            setattr(cat, field, payload[field])
+    await db.commit()
+    await db.refresh(cat)
+    return {"id": str(cat.id), "name": cat.name, "slug": cat.slug, "description": cat.description, "is_active": cat.is_active}
+
+
+@router.delete("/categories/{category_id}", status_code=204)
+async def delete_category(category_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Category).where(Category.id == category_id))
+    cat = result.scalar_one_or_none()
+    if not cat:
+        raise NotFoundError("Category not found")
+    await db.delete(cat)
+    await db.commit()
+
+
 @router.post("/bulk-action")
 async def bulk_action(payload: BulkActionRequest, db: AsyncSession = Depends(get_db)):
     svc = ProductService(db)
@@ -211,6 +298,80 @@ async def export_products_csv(db: AsyncSession = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=products_export.csv"},
     )
+
+
+@router.get("/{slug}", response_model=ProductDetail)
+async def get_admin_product(slug: str, db: AsyncSession = Depends(get_db)):
+    """Fetch single product by slug (or UUID string). Defined after /export-csv to avoid conflict."""
+    from sqlalchemy.orm import selectinload
+    import uuid as _uuid
+
+    try:
+        uid = _uuid.UUID(slug)
+        query = select(Product).where(Product.id == uid)
+    except ValueError:
+        query = select(Product).where(Product.slug == slug)
+
+    query = query.options(
+        selectinload(Product.variants).selectinload(ProductVariant.inventory_records),
+        selectinload(Product.images),
+        selectinload(Product.category_links)
+        .selectinload(ProductCategory.category)
+        .selectinload(Category.children),
+    )
+    result = await db.execute(query)
+    product = result.scalar_one_or_none()
+    if not product:
+        raise NotFoundError(f"Product '{slug}' not found")
+
+    for variant in product.variants:
+        variant.stock_quantity = sum(
+            rec.quantity for rec in variant.inventory_records if rec.quantity > 0
+        )
+
+    return product
+
+
+@router.delete("/{product_id}", status_code=204)
+async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
+    if not product:
+        raise NotFoundError(f"Product {product_id} not found")
+    await db.delete(product)
+    await db.commit()
+
+
+@router.delete("/{product_id}/images/{image_id}", status_code=204)
+async def delete_product_image(
+    product_id: UUID, image_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ProductImage).where(
+            ProductImage.id == image_id, ProductImage.product_id == product_id
+        )
+    )
+    image = result.scalar_one_or_none()
+    if not image:
+        raise NotFoundError("Image not found")
+    await db.delete(image)
+    await db.commit()
+
+
+@router.delete("/{product_id}/variants/{variant_id}", status_code=204)
+async def delete_product_variant(
+    product_id: UUID, variant_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ProductVariant).where(
+            ProductVariant.id == variant_id, ProductVariant.product_id == product_id
+        )
+    )
+    variant = result.scalar_one_or_none()
+    if not variant:
+        raise NotFoundError("Variant not found")
+    variant.status = "discontinued"
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

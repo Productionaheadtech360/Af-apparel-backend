@@ -272,10 +272,13 @@ class ProductService:
         await self.db.flush()
 
     async def apply_bulk_action(self, ids: list[UUID], action: str) -> int:
-        """publish | unpublish | delete (soft) products."""
+        """publish | unpublish | delete | active | draft | archived."""
         from sqlalchemy import update
 
-        status_map = {"publish": "active", "unpublish": "draft", "delete": "archived"}
+        status_map = {
+            "publish": "active", "unpublish": "draft", "delete": "archived",
+            "active": "active", "draft": "draft", "archived": "archived",
+        }
         new_status = status_map.get(action)
         if not new_status:
             raise ValidationError(f"Unknown bulk action: {action}")

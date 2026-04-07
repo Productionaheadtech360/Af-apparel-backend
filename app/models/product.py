@@ -3,7 +3,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -53,6 +53,11 @@ class Product(BaseModel):
     meta_title: Mapped[str | None] = mapped_column(String(255))
     meta_description: Mapped[str | None] = mapped_column(String(500))
 
+    # Organization
+    product_type: Mapped[str | None] = mapped_column(String(100))
+    vendor: Mapped[str | None] = mapped_column(String(255))
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)), nullable=True)
+
     # Full-text search vector (updated via PostgreSQL trigger)
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
 
@@ -98,6 +103,7 @@ class ProductVariant(BaseModel):
     color: Mapped[str | None] = mapped_column(String(100))
     size: Mapped[str | None] = mapped_column(String(50))
     retail_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    compare_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     # Status: active | discontinued | out_of_stock
     status: Mapped[str] = mapped_column(
         Enum("active", "discontinued", "out_of_stock", name="variant_status"),

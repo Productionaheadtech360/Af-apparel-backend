@@ -1,9 +1,10 @@
 """Admin — order management and RMA."""
 import csv
 import io
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.schemas.order import (
     AdminOrderListItem,
     CancelOrderRequest,
     OrderItemOut,
+    OrderStatusUpdate,
     OrderUpdateRequest,
     RMACreate,
     RMAOut,
@@ -80,6 +82,10 @@ async def list_admin_orders(
             total=order.total,
             item_count=item_count,
             created_at=order.created_at,
+            tracking_number=order.tracking_number,
+            courier=order.courier,
+            courier_service=order.courier_service,
+            shipped_at=order.shipped_at,
         ))
 
     return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, pages=(total + page_size - 1) // page_size)
@@ -144,6 +150,9 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
         company_id=order.company_id,
         company_name=company_name,
         tracking_number=order.tracking_number,
+        courier=order.courier,
+        courier_service=order.courier_service,
+        shipped_at=order.shipped_at,
         qb_invoice_id=order.qb_invoice_id,
         created_at=order.created_at,
         updated_at=order.updated_at,
@@ -179,6 +188,44 @@ async def update_admin_order(
             send_order_cancelled_email.delay(str(order_id))
 
     return {"message": "Order updated"}
+
+
+@router.patch("/orders/{order_id}/status", response_model=dict)
+async def update_order_status(
+    order_id: UUID,
+    payload: OrderStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    old_status = order.status
+    order.status = payload.status
+
+    if payload.tracking_number is not None:
+        order.tracking_number = payload.tracking_number
+    if payload.courier is not None:
+        order.courier = payload.courier
+    if payload.courier_service is not None:
+        order.courier_service = payload.courier_service
+    if payload.status == "shipped" and not order.shipped_at:
+        order.shipped_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    if payload.status != old_status:
+        if payload.status == "shipped":
+            from app.tasks.email_tasks import send_order_shipped_email
+            send_order_shipped_email.delay(str(order_id), order.tracking_number or "")
+        elif payload.status == "confirmed":
+            from app.tasks.email_tasks import send_invoice_email
+            send_invoice_email.delay(str(order_id))
+        elif payload.status == "cancelled":
+            from app.tasks.email_tasks import send_order_cancelled_email
+            send_order_cancelled_email.delay(str(order_id))
+
+    return {"success": True, "status": order.status}
 
 
 @router.post("/orders/{order_id}/cancel", response_model=dict)
