@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
+from app.core.redis import redis_delete
 from app.models.product import Category, Product, ProductCategory, ProductImage, ProductVariant
 from app.schemas.product import (
     BulkActionRequest,
@@ -263,6 +264,7 @@ async def create_category(
     )
     db.add(cat)
     await db.commit()
+    await redis_delete("categories:tree")
     return await _load_category(db, cat.id)
 
 
@@ -274,11 +276,12 @@ async def update_category(
 ):
     cat = await _load_category(db, category_id)
     if not cat:
-        raise NotFoundError("Category not found")
+        raise NotFoundError(f"Category not found: {category_id}")
     for field in ("name", "slug", "description", "is_active", "sort_order"):
         if field in payload:
             setattr(cat, field, payload[field])
     await db.commit()
+    await redis_delete("categories:tree")
     return await _load_category(db, category_id)
 
 
@@ -287,9 +290,10 @@ async def delete_category(category_id: UUID, db: AsyncSession = Depends(get_db))
     result = await db.execute(select(Category).where(Category.id == category_id))
     cat = result.scalar_one_or_none()
     if not cat:
-        raise NotFoundError("Category not found")
+        raise NotFoundError(f"Category not found: {category_id}")
     await db.delete(cat)
     await db.commit()
+    await redis_delete("categories:tree")
 
 
 @router.post("/bulk-action")
