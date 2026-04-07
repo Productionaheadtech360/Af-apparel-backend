@@ -26,7 +26,7 @@ CategoryOut.model_rebuild()
 
 class CategoryCreate(BaseModel):
     name: str
-    slug: str
+    slug: str = ""
     description: str | None = None
     parent_id: UUID | None = None
     sort_order: int = 0

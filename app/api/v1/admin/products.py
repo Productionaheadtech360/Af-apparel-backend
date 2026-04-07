@@ -241,13 +241,22 @@ async def create_category(
     payload: CategoryCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    existing = await db.execute(select(Category).where(Category.slug == payload.slug))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Slug already exists")
+    import re
+    slug = payload.slug.strip() or re.sub(r"[^a-z0-9]+", "-", payload.name.lower()).strip("-")
+
+    # Ensure uniqueness by appending a counter if the slug already exists
+    base_slug = slug
+    counter = 1
+    while True:
+        existing = await db.execute(select(Category).where(Category.slug == slug))
+        if not existing.scalar_one_or_none():
+            break
+        slug = f"{base_slug}-{counter}"
+        counter += 1
 
     cat = Category(
         name=payload.name,
-        slug=payload.slug,
+        slug=slug,
         description=payload.description,
         parent_id=payload.parent_id,
         sort_order=payload.sort_order,
