@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Reques
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
@@ -225,6 +226,16 @@ async def update_variant(
     return {"id": str(variant.id), "sku": variant.sku}
 
 
+async def _load_category(db: AsyncSession, category_id: UUID) -> Category | None:
+    """Load category with children eagerly to avoid async lazy-load MissingGreenletError."""
+    result = await db.execute(
+        select(Category)
+        .where(Category.id == category_id)
+        .options(selectinload(Category.children))
+    )
+    return result.scalar_one_or_none()
+
+
 @router.post("/categories", response_model=CategoryOut, status_code=201)
 async def create_category(
     payload: CategoryCreate,
@@ -243,8 +254,7 @@ async def create_category(
     )
     db.add(cat)
     await db.commit()
-    await db.refresh(cat)
-    return cat
+    return await _load_category(db, cat.id)
 
 
 @router.patch("/categories/{category_id}", response_model=CategoryOut)
@@ -253,16 +263,14 @@ async def update_category(
     payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Category).where(Category.id == category_id))
-    cat = result.scalar_one_or_none()
+    cat = await _load_category(db, category_id)
     if not cat:
         raise NotFoundError("Category not found")
     for field in ("name", "slug", "description", "is_active", "sort_order"):
         if field in payload:
             setattr(cat, field, payload[field])
     await db.commit()
-    await db.refresh(cat)
-    return cat
+    return await _load_category(db, category_id)
 
 
 @router.delete("/categories/{category_id}", status_code=204)
