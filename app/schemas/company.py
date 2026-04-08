@@ -1,7 +1,7 @@
 from uuid import UUID
 from decimal import Decimal
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CompanyListItem(BaseModel):
@@ -36,6 +36,15 @@ class CompanyDetail(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_tags(cls, v: object) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(t) for t in v]
+        return []
 
 
 class CompanyUpdate(BaseModel):

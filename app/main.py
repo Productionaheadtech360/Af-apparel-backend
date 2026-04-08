@@ -29,6 +29,26 @@ if settings.SENTRY_DSN:
 # ── App factory ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Run DB migrations before accepting traffic. Non-fatal so the app can
+    # still start (and serve /health) even if alembic reports no changes.
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd="/app",
+        )
+        # Trim to last 2 KB so we don't flood logs
+        if result.stdout:
+            print("Migration stdout:", result.stdout[-2000:])
+        if result.stderr:
+            print("Migration stderr:", result.stderr[-2000:])
+        if result.returncode != 0:
+            print(f"Migration exited {result.returncode} (non-fatal — app will continue)")
+    except Exception as exc:
+        print(f"Migration error (non-fatal): {exc}")
+
     assert await check_db_connection(), "Database connection failed on startup"
     assert await check_redis_connection(), "Redis connection failed on startup"
     yield
