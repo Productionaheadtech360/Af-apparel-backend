@@ -3,9 +3,11 @@ import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.models.order import Order
 from app.schemas.wholesale import ApproveApplicationRequest, RejectApplicationRequest, WholesaleApplicationOut
 from app.schemas.company import CompanyDetail, CompanyListItem, CompanyUpdate, SuspendRequest
 from app.services.wholesale_service import WholesaleService
@@ -114,3 +116,20 @@ async def reactivate_company(company_id: UUID, db: AsyncSession = Depends(get_db
     await svc.reactivate(company_id)
     await db.commit()
     return {"message": "Company reactivated"}
+
+
+@router.get("/companies/{company_id}/stats")
+async def get_customer_stats(company_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(
+            func.count(Order.id).label("total_orders"),
+            func.coalesce(func.sum(Order.total), 0).label("total_spent"),
+            func.max(Order.created_at).label("last_order_date"),
+        ).where(Order.company_id == company_id)
+    )
+    row = result.one()
+    return {
+        "total_orders": row.total_orders or 0,
+        "total_spent": float(row.total_spent or 0),
+        "last_order_date": row.last_order_date,
+    }
