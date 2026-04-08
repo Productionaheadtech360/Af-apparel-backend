@@ -24,11 +24,14 @@ class CompanyDetail(BaseModel):
     tax_id: str | None
     business_type: str | None
     website: str | None
+    phone: str | None = None
     pricing_tier_id: UUID | None
     shipping_tier_id: UUID | None
     shipping_override_amount: Decimal | None
     stripe_customer_id: str | None
     qb_customer_id: str | None
+    admin_notes: str | None = None
+    tags: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -40,6 +43,8 @@ class CompanyUpdate(BaseModel):
     shipping_tier_id: UUID | None = None
     shipping_override_amount: Decimal | None = None
     status: str | None = None
+    admin_notes: str | None = None
+    tags: list[str] | None = None
 
 
 class SuspendRequest(BaseModel):

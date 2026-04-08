@@ -3,7 +3,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -63,8 +63,9 @@ class Company(BaseModel):
     ppai_number: Mapped[str | None] = mapped_column(String(100))
     asi_number: Mapped[str | None] = mapped_column(String(100))
 
-    # Notes
+    # Notes & Tags
     admin_notes: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[list | None] = mapped_column(JSONB, default=list, server_default="'[]'::jsonb")
 
     # ── Relationships ─────────────────────────────────────────────────────────
     users: Mapped[list["CompanyUser"]] = relationship(
