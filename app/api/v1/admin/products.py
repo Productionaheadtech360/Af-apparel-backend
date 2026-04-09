@@ -78,7 +78,21 @@ async def create_product(payload: ProductCreate, db: AsyncSession = Depends(get_
     svc = ProductService(db)
     product = await svc.create_product(payload)
     await db.commit()
-    return product
+
+    # Reload with all relationships eagerly — prevents MissingGreenletError when
+    # FastAPI serialises ProductDetail (images / variants / category_links).
+    result = await db.execute(
+        select(Product)
+        .where(Product.id == product.id)
+        .options(
+            selectinload(Product.variants),
+            selectinload(Product.images),
+            selectinload(Product.category_links)
+            .selectinload(ProductCategory.category)
+            .selectinload(Category.children),
+        )
+    )
+    return result.scalar_one()
 
 
 @router.patch("/{product_id}", response_model=ProductDetail)
@@ -88,7 +102,19 @@ async def update_product(
     svc = ProductService(db)
     product = await svc.update_product(product_id, payload)
     await db.commit()
-    return product
+
+    result = await db.execute(
+        select(Product)
+        .where(Product.id == product.id)
+        .options(
+            selectinload(Product.variants),
+            selectinload(Product.images),
+            selectinload(Product.category_links)
+            .selectinload(ProductCategory.category)
+            .selectinload(Category.children),
+        )
+    )
+    return result.scalar_one()
 
 
 @router.post("/{product_id}/images/from-url")
