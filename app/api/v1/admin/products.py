@@ -91,6 +91,39 @@ async def update_product(
     return product
 
 
+@router.post("/{product_id}/images/from-url")
+async def add_image_from_url(
+    product_id: UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a product image from an external URL — no upload/resize, same URL stored in all size slots."""
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    if not result.scalar_one_or_none():
+        raise NotFoundError(f"Product {product_id} not found")
+
+    from sqlalchemy import func as sqlfunc
+    count_result = await db.execute(
+        select(sqlfunc.count()).where(ProductImage.product_id == product_id)
+    )
+    position = count_result.scalar_one() or 0
+
+    url = str(payload.get("url", ""))
+    image = ProductImage(
+        product_id=product_id,
+        url_thumbnail=url,
+        url_medium=url,
+        url_large=url,
+        alt_text=payload.get("alt_text"),
+        is_primary=bool(payload.get("is_primary", position == 0)),
+        sort_order=position,
+    )
+    db.add(image)
+    await db.commit()
+    await db.refresh(image)
+    return {"id": str(image.id), "url": url, "alt_text": image.alt_text}
+
+
 @router.post("/{product_id}/images", response_model=ImageUploadResponse)
 async def upload_product_image(
     product_id: UUID,
