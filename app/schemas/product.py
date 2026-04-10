@@ -96,19 +96,19 @@ class ProductDetail(BaseModel):
     id: UUID
     name: str
     slug: str
-    description: str | None
-    status: str
-    moq: int
-    images: list[ProductImageOut]
-    variants: list[VariantOut]
-    categories: list[CategoryOut]
-    meta_title: str | None
-    meta_description: str | None
+    description: str | None = None
+    status: str = "draft"
+    moq: int = 1
+    images: list[ProductImageOut] = []
+    variants: list[VariantOut] = []
+    categories: list[CategoryOut] = []
+    meta_title: str | None = None
+    meta_description: str | None = None
     product_type: str | None = None
     vendor: str | None = None
     tags: list[str] | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

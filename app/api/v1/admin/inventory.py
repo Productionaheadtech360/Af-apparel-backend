@@ -62,15 +62,18 @@ async def list_inventory(
         return await svc.get_inventory_by_variant(variant_id)
     if low_stock_only:
         return await svc.get_low_stock_variants()
-    # Return all — paginated by variant
+    # Return all — left join so variants without inventory records also appear
     from sqlalchemy import select
     from app.models.inventory import InventoryRecord, Warehouse
-    from app.models.product import ProductVariant
+    from app.models.product import Product, ProductVariant
 
     result = await db.execute(
-        select(InventoryRecord, ProductVariant, Warehouse)
-        .join(ProductVariant, InventoryRecord.variant_id == ProductVariant.id)
-        .join(Warehouse, InventoryRecord.warehouse_id == Warehouse.id)
+        select(ProductVariant, InventoryRecord, Warehouse, Product.name.label("product_name"))
+        .join(Product, ProductVariant.product_id == Product.id)
+        .outerjoin(InventoryRecord, InventoryRecord.variant_id == ProductVariant.id)
+        .outerjoin(Warehouse, InventoryRecord.warehouse_id == Warehouse.id)
+        .where(ProductVariant.status != "discontinued")
+        .order_by(Product.name, ProductVariant.color, ProductVariant.size)
         .limit(500)
     )
     return [
@@ -79,12 +82,13 @@ async def list_inventory(
             "sku": v.sku,
             "color": v.color,
             "size": v.size,
-            "warehouse_id": str(wh.id),
-            "warehouse_name": wh.name,
-            "quantity": rec.quantity,
-            "low_stock_threshold": rec.low_stock_threshold,
+            "product_name": product_name,
+            "warehouse_id": str(wh.id) if wh else None,
+            "warehouse_name": wh.name if wh else "—",
+            "quantity": rec.quantity if rec else 0,
+            "low_stock_threshold": rec.low_stock_threshold if rec else 10,
         }
-        for rec, v, wh in result.all()
+        for v, rec, wh, product_name in result.all()
     ]
 
 
