@@ -261,6 +261,36 @@ async def bulk_generate_variants(
     return {"generated": len(variants), "variants": [{"id": str(v.id), "sku": v.sku} for v in variants]}
 
 
+@router.post("/{product_id}/variants/batch")
+async def create_variants_batch(
+    product_id: UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create multiple variants in one call with explicit SKUs (used by CSV import)."""
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    if not result.scalar_one_or_none():
+        raise NotFoundError(f"Product {product_id} not found")
+
+    variants_data: list[dict] = payload.get("variants", [])
+    created: list[ProductVariant] = []
+    for v in variants_data:
+        variant = ProductVariant(
+            product_id=product_id,
+            sku=str(v.get("sku", "")),
+            color=v.get("color"),
+            size=v.get("size"),
+            retail_price=float(v.get("retail_price", 0)),
+            status=str(v.get("status", "active")),
+        )
+        db.add(variant)
+        created.append(variant)
+
+    await db.flush()
+    await db.commit()
+    return {"created": len(created), "variants": [{"id": str(v.id), "sku": v.sku} for v in created]}
+
+
 @router.patch("/{product_id}/variants/{variant_id}")
 async def update_variant(
     product_id: UUID,
@@ -381,6 +411,7 @@ async def create_category(
         description=payload.description,
         parent_id=payload.parent_id,
         sort_order=payload.sort_order,
+        image_url=payload.image_url,
     )
     db.add(cat)
     await db.commit()
