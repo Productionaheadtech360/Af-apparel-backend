@@ -179,12 +179,12 @@ async def upload_product_image(
         url_thumbnail=urls["thumbnail"],
         url_medium=urls["medium"],
         url_large=urls["large"],
-        url_thumbnail_webp=urls["thumbnail_webp"],
-        url_medium_webp=urls["medium_webp"],
-        url_large_webp=urls["large_webp"],
+        url_webp_thumbnail=urls["thumbnail_webp"],
+        url_webp_medium=urls["medium_webp"],
+        url_webp_large=urls["large_webp"],
         alt_text=alt_text,
         is_primary=position == 0,
-        position=position,
+        sort_order=position,
     )
     db.add(image)
     await db.commit()
@@ -214,7 +214,7 @@ async def reorder_product_images(
         )
         image = result.scalar_one_or_none()
         if image:
-            image.position = position
+            image.sort_order = position
             image.is_primary = position == 0
 
     await db.commit()
