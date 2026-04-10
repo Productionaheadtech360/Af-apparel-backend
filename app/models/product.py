@@ -24,6 +24,7 @@ class Category(BaseModel):
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     parent: Mapped["Category | None"] = relationship("Category", remote_side="Category.id")
     children: Mapped[list["Category"]] = relationship("Category", back_populates="parent", foreign_keys=[parent_id])

@@ -17,6 +17,7 @@ class CategoryOut(BaseModel):
     parent_id: UUID | None = None
     sort_order: int = 0
     is_active: bool = True
+    image_url: str | None = None
     children: list["CategoryOut"] = []
 
     model_config = {"from_attributes": True}
@@ -30,6 +31,7 @@ class CategoryCreate(BaseModel):
     description: str | None = None
     parent_id: UUID | None = None
     sort_order: int = 0
+    image_url: str | None = None
 
 
 # ---------------------------------------------------------------------------

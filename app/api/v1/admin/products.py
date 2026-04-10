@@ -278,9 +278,70 @@ async def update_variant(
     if not variant:
         raise NotFoundError("Variant not found")
 
+    # Numeric fields that need type coercion
+    numeric_float = {"retail_price", "compare_price"}
+    numeric_int = {"sort_order"}
+    skip_fields = {"stock_quantity"}  # handled separately via inventory records
+
     for field, value in payload.items():
-        if hasattr(variant, field):
-            setattr(variant, field, value)
+        if field in skip_fields:
+            continue
+        if not hasattr(variant, field):
+            continue
+        if field in numeric_float:
+            try:
+                value = float(value) if value not in (None, "") else None
+            except (TypeError, ValueError):
+                value = None
+        elif field in numeric_int:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                value = 0
+        setattr(variant, field, value)
+
+    # Handle stock_quantity: update inventory record in default warehouse
+    if "stock_quantity" in payload:
+        try:
+            requested_qty = max(0, int(payload["stock_quantity"]))
+        except (TypeError, ValueError):
+            requested_qty = 0
+
+        from app.models.inventory import InventoryRecord, Warehouse
+        from app.services.inventory_service import InventoryService
+
+        # Get or pick first warehouse
+        wh_result = await db.execute(
+            select(Warehouse).where(Warehouse.is_active == True).limit(1)  # noqa: E712
+        )
+        warehouse = wh_result.scalar_one_or_none()
+
+        if warehouse is None:
+            # Auto-create a default warehouse
+            warehouse = Warehouse(name="Main Warehouse", code="MAIN")
+            db.add(warehouse)
+            await db.flush()
+
+        # Get current quantity for this variant + warehouse
+        rec_result = await db.execute(
+            select(InventoryRecord).where(
+                InventoryRecord.variant_id == variant_id,
+                InventoryRecord.warehouse_id == warehouse.id,
+            )
+        )
+        rec = rec_result.scalar_one_or_none()
+        current_qty = rec.quantity if rec else 0
+        delta = requested_qty - current_qty
+
+        if delta != 0 or rec is None:
+            svc = InventoryService(db)
+            await svc.adjust_stock_with_log(
+                variant_id=variant_id,
+                warehouse_id=warehouse.id,
+                quantity_delta=delta if rec is not None else requested_qty,
+                reason="correction",
+                notes="Updated via admin product edit",
+            )
 
     await db.commit()
     return {"id": str(variant.id), "sku": variant.sku}
@@ -336,7 +397,7 @@ async def update_category(
     cat = await _load_category(db, category_id)
     if not cat:
         raise NotFoundError(f"Category not found: {category_id}")
-    for field in ("name", "slug", "description", "is_active", "sort_order"):
+    for field in ("name", "slug", "description", "is_active", "sort_order", "image_url"):
         if field in payload:
             setattr(cat, field, payload[field])
     await db.commit()

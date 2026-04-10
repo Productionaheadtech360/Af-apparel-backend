@@ -21,20 +21,67 @@ class CompanyService:
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[Company], int]:
-        query = select(Company)
+    ) -> tuple[list, int]:
+        # Build base filter
+        filters = []
         if q:
-            query = query.where(Company.name.ilike(f"%{q}%"))
+            filters.append(Company.name.ilike(f"%{q}%"))
         if status:
-            query = query.where(Company.status == status)
+            filters.append(Company.status == status)
 
-        count_q = select(func.count()).select_from(query.subquery())
+        # Subqueries for order stats
+        order_count_sub = (
+            select(Order.company_id, func.count(Order.id).label("order_count"))
+            .group_by(Order.company_id)
+            .subquery()
+        )
+        total_spend_sub = (
+            select(
+                Order.company_id,
+                func.coalesce(func.sum(Order.total), 0).label("total_spend"),
+            )
+            .where(Order.payment_status == "paid")
+            .group_by(Order.company_id)
+            .subquery()
+        )
+
+        query = (
+            select(
+                Company,
+                func.coalesce(order_count_sub.c.order_count, 0).label("order_count"),
+                func.coalesce(total_spend_sub.c.total_spend, 0).label("total_spend"),
+            )
+            .outerjoin(order_count_sub, Company.id == order_count_sub.c.company_id)
+            .outerjoin(total_spend_sub, Company.id == total_spend_sub.c.company_id)
+        )
+        if filters:
+            query = query.where(*filters)
+
+        count_q = select(func.count(Company.id))
+        if filters:
+            count_q = count_q.where(*filters)
         total_result = await self.db.execute(count_q)
         total = total_result.scalar_one()
 
         query = query.offset((page - 1) * page_size).limit(page_size).order_by(Company.name)
         result = await self.db.execute(query)
-        return list(result.scalars().all()), total
+        rows = result.all()
+
+        # Build list of dicts that match CompanyListItem schema
+        companies = []
+        for row in rows:
+            company = row[0]
+            companies.append({
+                "id": company.id,
+                "name": company.name,
+                "status": company.status,
+                "pricing_tier_id": company.pricing_tier_id,
+                "shipping_tier_id": company.shipping_tier_id,
+                "order_count": int(row[1]),
+                "total_spend": Decimal(str(row[2])),
+                "created_at": company.created_at,
+            })
+        return companies, total
 
     async def get_company_detail(self, company_id: UUID) -> Company:
         result = await self.db.execute(
