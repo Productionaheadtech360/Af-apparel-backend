@@ -46,13 +46,16 @@ async def login(
     service = AuthService(db)
     login_response, refresh_token = await service.login(data.email, data.password)
 
+    # Cross-origin deployments (Vercel → Railway) require SameSite=none + Secure.
+    # Fall back to configured values for local dev.
+    _prod = settings.APP_ENV == "production"
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         max_age=REFRESH_COOKIE_MAX_AGE,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,  # type: ignore[arg-type]
+        secure=True if _prod else settings.COOKIE_SECURE,
+        samesite="none" if _prod else settings.COOKIE_SAMESITE,  # type: ignore[arg-type]
         path="/api/v1/refresh",
         domain=settings.COOKIE_DOMAIN,
     )
@@ -97,13 +100,14 @@ async def refresh(
     service = AuthService(db)
     token_response, new_refresh_token = await service.refresh_tokens(refresh_token)
 
+    _prod = settings.APP_ENV == "production"
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=new_refresh_token,
         max_age=REFRESH_COOKIE_MAX_AGE,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,  # type: ignore[arg-type]
+        secure=True if _prod else settings.COOKIE_SECURE,
+        samesite="none" if _prod else settings.COOKIE_SAMESITE,  # type: ignore[arg-type]
         path="/api/v1/refresh",
         domain=settings.COOKIE_DOMAIN,
     )

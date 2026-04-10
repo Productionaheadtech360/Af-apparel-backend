@@ -1,15 +1,15 @@
 """add image_url to categories
 
-Revision ID: a1b2c3d4e5f6
-Revises: f6e5d4c3b2a1
+Revision ID: c4d5e6f7a8b9
+Revises: b3c4d5e6f7a8
 Create Date: 2026-04-10 00:00:00.000000
 
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "a1b2c3d4e5f6"
-down_revision = "f6e5d4c3b2a1"
+revision = "c4d5e6f7a8b9"
+down_revision = "b3c4d5e6f7a8"
 branch_labels = None
 depends_on = None
 
