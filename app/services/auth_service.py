@@ -1,10 +1,14 @@
+# backend/app/services/auth_service.py
 """Authentication service."""
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+import logging
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import get_settings, settings
 
 from app.core.exceptions import (
     AccountSuspendedError,
@@ -171,22 +175,69 @@ class AuthService:
         self.db.add(application)
         await self.db.flush()
 
+        from app.services.email_service import EmailService
+        email_svc = EmailService(self.db)
+        try:
+            await email_svc.send(
+                trigger_event="wholesale_application_received",
+                to_email=application.email,
+                variables={
+                    "first_name": data.first_name,
+                    "company_name": data.company_name,
+                },
+            )
+        except Exception:
+            pass  # non-fatal — application still saved
+
+        # ✅ Admin notification
+        if settings.ADMIN_NOTIFICATION_EMAIL:
+            try:
+                email_svc.send_raw(
+                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                    subject=f"New Wholesale Application — {data.company_name}",
+                    body_html=f"""
+                        <h2>New Wholesale Application</h2>
+                        <p><b>Company:</b> {data.company_name}</p>
+                        <p><b>Name:</b> {data.first_name} {data.last_name}</p>
+                        <p><b>Email:</b> {data.email}</p>
+                        <p><b>Phone:</b> {data.phone}</p>
+                        <p><b>Business Type:</b> {data.business_type}</p>
+                        <a href="{settings.FRONTEND_URL}/admin/customers">Review Application →</a>
+                    """,
+                )
+            except Exception:
+                pass  # non-fatal
+
         return application
 
     async def send_password_reset(self, email: str) -> None:
-        """Send a password reset email if the user exists. Always returns 200 to prevent enumeration."""
         result = await self.db.execute(select(User).where(User.email == email.lower()))
         user = result.scalar_one_or_none()
         if not user:
-            return  # Silently ignore — don't reveal email existence
+            return
 
         token = secrets.token_urlsafe(32)
         user.password_reset_token = token
         user.password_reset_expires = datetime.now(UTC) + timedelta(hours=1)
         await self.db.flush()
 
-        from app.tasks.email_tasks import send_password_reset_email
-        send_password_reset_email.delay(str(user.id), token)
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+
+        # ✅ Direct call — no Celery
+        from app.services.email_service import EmailService
+        email_svc = EmailService(self.db)
+        try:
+            await email_svc.send(
+                trigger_event="password_reset",
+                to_email=user.email,
+                variables={
+                    "first_name": user.first_name or "there",
+                    "reset_url": reset_url,
+                    "expiry_hours": 1,
+                },
+            )
+        except Exception:
+            logger.warning("Password reset email failed for %s", email)
 
     async def reset_password(self, token: str, new_password: str) -> None:
         result = await self.db.execute(

@@ -1,3 +1,4 @@
+# backend/app/services/order_service.py
 """OrderService — create orders with server-side validation + price snapshots."""
 import logging
 from decimal import Decimal
@@ -196,9 +197,56 @@ class OrderService:
         )
         order = result.scalar_one()
 
-        # 11. Queue confirmation email
-        from app.tasks.email_tasks import send_order_confirmation_email
-        send_order_confirmation_email.delay(str(order.id))
+        # Step 11 — ✅ Direct email, no Celery
+        try:
+            from app.services.email_service import EmailService
+            email_svc = EmailService(self.db)
+            
+            # Customer ko confirmation
+            customer_result = await self.db.execute(
+                select(User).where(User.id == user_id)
+            )
+            customer = customer_result.scalar_one_or_none()
+            
+            if customer:
+                await email_svc.send(
+                    trigger_event="order_confirmation",
+                    to_email=customer.email,
+                    variables={
+                        "first_name": customer.first_name or "there",
+                        "order_number": order.order_number,
+                        "order_total": f"${float(order.total):.2f}",
+                        "order_url": f"{settings.FRONTEND_URL}/account/orders/{order.id}",
+                        "items": [
+                            {
+                                "product_name": i.product_name,
+                                "sku": i.sku,
+                                "color": i.color or "",
+                                "size": i.size or "",
+                                "quantity": i.quantity,
+                                "unit_price": f"${float(i.unit_price):.2f}",
+                                "line_total": f"${float(i.line_total):.2f}",
+                            }
+                            for i in order.items
+                        ],
+                    },
+                )
+        
+            # Admin ko notification
+            if settings.ADMIN_NOTIFICATION_EMAIL:
+                email_svc.send_raw(
+                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                    subject=f"New Order — {order.order_number} (${float(order.total):.2f})",
+                    body_html=f"""
+                        <h2>New Order Received</h2>
+                        <p><b>Order:</b> {order.order_number}</p>
+                        <p><b>Total:</b> ${float(order.total):.2f}</p>
+                        <p><b>Items:</b> {len(order.items)}</p>
+                        <a href="{settings.FRONTEND_URL}/admin/orders/{order.id}">View Order →</a>
+                    """,
+                )
+        except Exception as e:
+            logger.warning("Order confirmation email failed: %s", e)
 
         # 12. Auto-create statement charge transaction
         try:

@@ -1,3 +1,4 @@
+#backend/app/services/email_service.py
 """EmailService — DB-stored Jinja2 templates + Resend delivery."""
 import json
 import logging
