@@ -59,6 +59,10 @@ class Product(BaseModel):
     vendor: Mapped[str | None] = mapped_column(String(255))
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)), nullable=True)
 
+    fabric: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    product_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    weight: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    
     # Full-text search vector (updated via PostgreSQL trigger)
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
 
