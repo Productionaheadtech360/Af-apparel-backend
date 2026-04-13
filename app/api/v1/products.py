@@ -1,3 +1,4 @@
+# backend/app/api/v1/products.py
 import uuid
 from decimal import Decimal
 

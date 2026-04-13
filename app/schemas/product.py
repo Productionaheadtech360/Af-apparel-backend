@@ -1,3 +1,4 @@
+# backend/app/schemas/product.py
 from uuid import UUID
 from decimal import Decimal
 from datetime import datetime

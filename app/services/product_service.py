@@ -430,6 +430,10 @@ def _cat_to_dict(cat: Category) -> dict:
         "id": str(cat.id),
         "name": cat.name,
         "slug": cat.slug,
+        "description": getattr(cat, "description", None),
         "parent_id": str(cat.parent_id) if cat.parent_id else None,
+        "is_active": getattr(cat, "is_active", True),
+        "sort_order": getattr(cat, "sort_order", 0),
+        "image_url": getattr(cat, "image_url", None),  # ✅ yeh add karo
         "children": [_cat_to_dict(c) for c in getattr(cat, "children", [])],
     }
