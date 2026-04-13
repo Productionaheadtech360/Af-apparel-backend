@@ -209,6 +209,9 @@ class ProductService:
             slug=data.slug,
             description=data.description,
             moq=data.moq,
+            fabric=data.fabric,
+            product_code=data.product_code,
+            weight=data.weight,
             status=data.status,
             meta_title=data.meta_title,
             meta_description=data.meta_description,
@@ -432,6 +435,9 @@ def _product_to_dict(product: Product) -> dict:
         "categories": [_cat_to_dict(link.category) for link in getattr(product, "category_links", []) if getattr(link, "category", None)],
         "created_at": str(product.created_at),
         "updated_at": str(product.updated_at),
+        "fabric": getattr(product, "fabric", None),
+        "product_code": getattr(product, "product_code", None),
+        "weight": getattr(product, "weight", None),
     }
 
 

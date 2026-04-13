@@ -110,7 +110,10 @@ class ProductDetail(BaseModel):
     tags: list[str] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
+    fabric: str | None = None
+    product_code: str | None = None
+    weight: str | None = None
+    
     model_config = {"from_attributes": True}
 
 
@@ -144,6 +147,9 @@ class ProductCreate(BaseModel):
     product_type: str | None = None
     vendor: str | None = None
     tags: list[str] | None = None
+    fabric: str | None = None
+    product_code: str | None = None
+    weight: str | None = None
     category_ids: list[UUID] = []
 
 
@@ -157,6 +163,9 @@ class ProductUpdate(BaseModel):
     product_type: str | None = None
     vendor: str | None = None
     tags: list[str] | None = None
+    fabric: str | None = None
+    product_code: str | None = None
+    weight: str | None = None
     category_ids: list[UUID] | None = None
 
 
