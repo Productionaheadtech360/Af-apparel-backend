@@ -239,7 +239,7 @@ async def _seed_email_templates() -> None:
                 ) AS t(trigger_event, name, subject, body_html, body_text, available_variables)
                 WHERE NOT EXISTS (
                     SELECT 1 FROM email_templates 
-                    WHERE email_templates.trigger_event = t.trigger_event
+                    WHERE email_templates.trigger_event::text = t.trigger_event
                 )
             """))
         print("Email templates seeded successfully.")
