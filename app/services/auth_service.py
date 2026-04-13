@@ -175,19 +175,33 @@ class AuthService:
         self.db.add(application)
         await self.db.flush()
 
+        # ✅ Yeh lagao
         from app.services.email_service import EmailService
         email_svc = EmailService(self.db)
         try:
-            await email_svc.send(
-                trigger_event="wholesale_application_received",
+            email_svc.send_raw(
                 to_email=application.email,
-                variables={
-                    "first_name": data.first_name,
-                    "company_name": data.company_name,
-                },
+                subject="We Received Your Wholesale Application — AF Apparels",
+                body_html=f"""
+                    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                    <div style="background:#080808;padding:24px;text-align:center">
+                        <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
+                        <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
+                        <span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>
+                    </div>
+                    <div style="padding:32px;background:#fff">
+                        <h2>Application Received! ✅</h2>
+                        <p>Hi {data.first_name},</p>
+                        <p>We received your wholesale application for <b>{data.company_name}</b>.</p>
+                        <p>Our team will review within <b>1-2 business days</b> and notify you of our decision.</p>
+                        <p>Questions? Call <b>(214) 272-7213</b></p>
+                        <p>— AF Apparels Team</p>
+                    </div>
+                    </div>
+                """,
             )
         except Exception:
-            pass  # non-fatal — application still saved
+            pass
 
         # ✅ Admin notification
         if settings.ADMIN_NOTIFICATION_EMAIL:

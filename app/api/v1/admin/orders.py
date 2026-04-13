@@ -31,6 +31,77 @@ router = APIRouter(prefix="/admin", tags=["admin-orders"])
 
 
 # ---------------------------------------------------------------------------
+# Email helper
+# ---------------------------------------------------------------------------
+
+async def _send_order_status_email(order: Order, new_status: str, db: AsyncSession) -> None:
+    """Send email when order status changes."""
+    try:
+        from sqlalchemy import select as _select
+        from app.models.user import User
+        from app.models.company import Company as _Company
+        from app.models.company import CompanyUser
+        from app.services.email_service import EmailService
+        from app.core.config import settings
+
+        user_result = await db.execute(
+            _select(User)
+            .join(CompanyUser, CompanyUser.user_id == User.id)
+            .where(CompanyUser.company_id == order.company_id, CompanyUser.is_active == True)
+            .limit(1)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return
+
+        email_svc = EmailService(db)
+
+        if new_status == "shipped":
+            await email_svc.send(
+                trigger_event="order_shipped",
+                to_email=user.email,
+                variables={
+                    "first_name": user.first_name or "there",
+                    "order_number": order.order_number,
+                    "courier": order.courier or "Carrier",
+                    "tracking_number": order.tracking_number or "N/A",
+                },
+            )
+            if settings.ADMIN_NOTIFICATION_EMAIL:
+                email_svc.send_raw(
+                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                    subject=f"Order Shipped — {order.order_number}",
+                    body_html=f"<p>Order <b>{order.order_number}</b> marked as shipped. Tracking: {order.tracking_number or 'N/A'}</p>",
+                )
+
+        elif new_status == "cancelled":
+            email_svc.send_raw(
+                to_email=user.email,
+                subject=f"Order {order.order_number} Cancelled",
+                body_html=f"""
+                    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                    <div style="background:#080808;padding:24px;text-align:center">
+                        <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
+                        <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
+                        <span style="color:#fff;font-size:14px;margin-left:8px">APPARELS</span>
+                    </div>
+                    <div style="padding:32px;background:#fff">
+                        <h2>Order Cancelled</h2>
+                        <p>Hi {user.first_name or 'there'},</p>
+                        <p>Your order <b>{order.order_number}</b> has been cancelled.</p>
+                        <p>Questions? Call (214) 272-7213</p>
+                        <p>— AF Apparels Team</p>
+                    </div>
+                    </div>
+                """,
+            )
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Order status email failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Orders
 # ---------------------------------------------------------------------------
 
@@ -175,17 +246,8 @@ async def update_admin_order(
         setattr(order, field, value)
     await db.commit()
 
-    # Trigger transactional emails on status change
     if payload.status and payload.status != old_status:
-        if payload.status == "shipped":
-            from app.tasks.email_tasks import send_order_shipped_email
-            send_order_shipped_email.delay(str(order_id), order.tracking_number or "")
-        elif payload.status == "confirmed":
-            from app.tasks.email_tasks import send_invoice_email
-            send_invoice_email.delay(str(order_id))
-        elif payload.status == "cancelled":
-            from app.tasks.email_tasks import send_order_cancelled_email
-            send_order_cancelled_email.delay(str(order_id))
+        await _send_order_status_email(order, payload.status, db)
 
     return {"message": "Order updated"}
 
@@ -215,15 +277,7 @@ async def update_order_status(
     await db.commit()
 
     if payload.status != old_status:
-        if payload.status == "shipped":
-            from app.tasks.email_tasks import send_order_shipped_email
-            send_order_shipped_email.delay(str(order_id), order.tracking_number or "")
-        elif payload.status == "confirmed":
-            from app.tasks.email_tasks import send_invoice_email
-            send_invoice_email.delay(str(order_id))
-        elif payload.status == "cancelled":
-            from app.tasks.email_tasks import send_order_cancelled_email
-            send_order_cancelled_email.delay(str(order_id))
+        await _send_order_status_email(order, payload.status, db)
 
     return {"success": True, "status": order.status}
 
@@ -242,8 +296,7 @@ async def cancel_admin_order(
         order.notes = f"Cancelled: {payload.reason}"
     await db.commit()
 
-    from app.tasks.email_tasks import send_order_cancelled_email
-    send_order_cancelled_email.delay(str(order_id), payload.reason)
+    await _send_order_status_email(order, "cancelled", db)
 
     return {"message": "Order cancelled"}
 
@@ -256,7 +309,7 @@ async def sync_order_to_quickbooks(order_id: UUID, db: AsyncSession = Depends(ge
 
 
 # ---------------------------------------------------------------------------
-# Admin RMA management (T180 — US-14)
+# Admin RMA management
 # ---------------------------------------------------------------------------
 
 @router.get("/rma")
@@ -297,21 +350,17 @@ async def update_rma(
         rma.admin_notes = payload.admin_notes
     await db.commit()
 
-    from app.tasks.email_tasks import send_rma_status_email
-    send_rma_status_email.delay(str(rma_id))
-
     return {"message": f"RMA {payload.status}"}
 
 
 # ---------------------------------------------------------------------------
-# Abandoned Carts — admin view (T208)
+# Abandoned Carts — admin view
 # ---------------------------------------------------------------------------
 
 @router.get("/abandoned-carts")
 async def admin_list_abandoned_carts(
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin view — all abandoned carts across all companies, newest first."""
     import json
     from app.models.order import AbandonedCart
 

@@ -4,6 +4,7 @@ import logging
 from decimal import Decimal
 from uuid import UUID
 
+from app.models.user import User  # ← yeh add karo
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
