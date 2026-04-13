@@ -221,6 +221,30 @@ async def _seed_email_templates() -> None:
                         '["first_name","order_number","order_total","order_url","items"]'
                     ),
                     (
+                        'order_shipped',
+                        'Order Shipped',
+                        'Your Order {{ order_number }} Has Shipped!',
+                        '<h1>Your Order is On Its Way! 🚚</h1><p>Hi {{ first_name }},</p><p>Order <b>{{ order_number }}</b> has shipped.</p><p>Courier: <b>{{ courier }}</b></p><p>Tracking: <b>{{ tracking_number }}</b></p><p>— AF Apparels</p>',
+                        'Order {{ order_number }} shipped. Tracking: {{ tracking_number }}',
+                        '["first_name","order_number","courier","tracking_number"]'
+                    ),
+                    (
+                        'wholesale_approved',
+                        'Wholesale Application Approved',
+                        'Your Wholesale Account is Approved!',
+                        '<h1>Welcome to AF Apparels Wholesale! 🎉</h1><p>Hi {{ first_name }},</p><p>Your account for <b>{{ company_name }}</b> has been approved.</p><a href="{{ login_url }}" style="background:#E8242A;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:16px;font-weight:700">Log In Now →</a><p>— AF Apparels</p>',
+                        'Hi {{ first_name }}, your wholesale account for {{ company_name }} is approved!',
+                        '["first_name","company_name","login_url"]'
+                    ),
+                    (
+                        'wholesale_rejected',
+                        'Wholesale Application Update',
+                        'Update on Your Wholesale Application',
+                        '<h1>Application Update</h1><p>Hi {{ first_name }},</p><p>Unfortunately we are unable to approve your wholesale application for <b>{{ company_name }}</b> at this time.</p><p>Reason: {{ reason }}</p><p>Questions? Call (214) 272-7213</p><p>— AF Apparels</p>',
+                        'Hi {{ first_name }}, your application for {{ company_name }} was not approved. Reason: {{ reason }}',
+                        '["first_name","company_name","reason"]'
+                    ),
+                    (
                         'password_reset',
                         'Password Reset',
                         'Reset Your AF Apparels Password',
@@ -229,12 +253,20 @@ async def _seed_email_templates() -> None:
                         '["first_name","reset_url","expiry_hours"]'
                     ),
                     (
-                        'wholesale_application_received',
-                        'Wholesale Application Received',
-                        'Application Received — {{ company_name }}',
-                        '<h1>Application Received!</h1><p>Hi {{ first_name }},</p><p>We received your application for <b>{{ company_name }}</b>. Review within 1-2 business days.</p><p>— AF Apparels</p>',
-                        'Hi {{ first_name }}, application for {{ company_name }} received.',
-                        '["first_name","company_name"]'
+                        'welcome',
+                        'Welcome to AF Apparels',
+                        'Welcome to AF Apparels Wholesale!',
+                        '<h1>Welcome, {{ first_name }}! 👋</h1><p>Your account is ready. Start browsing our wholesale catalog.</p><a href="{{ shop_url }}" style="background:#1A5CFF;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:16px;">Shop Now →</a><p>— AF Apparels</p>',
+                        'Welcome {{ first_name }}! Your AF Apparels wholesale account is ready.',
+                        '["first_name","shop_url"]'
+                    ),
+                    (
+                        'payment_failed',
+                        'Payment Failed',
+                        'Payment Failed for Order {{ order_number }}',
+                        '<h1>Payment Issue</h1><p>Hi {{ first_name }},</p><p>Payment for order <b>{{ order_number }}</b> failed.</p><p>Please update your payment method.</p><a href="{{ account_url }}" style="background:#E8242A;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:16px;">Update Payment →</a><p>— AF Apparels</p>',
+                        'Hi {{ first_name }}, payment failed for order {{ order_number }}.',
+                        '["first_name","order_number","account_url"]'
                     )
                 ) AS t(trigger_event, name, subject, body_html, body_text, available_variables)
                 WHERE NOT EXISTS (
