@@ -102,6 +102,8 @@ class ProductService:
                 ProductVariant.color == params.color,
                 ProductVariant.status == "active",
             )
+        if params.gender:
+            query = query.where(Product.gender == params.gender)
 
         if params.fabric:
             query = query.where(Product.fabric.ilike(f"%{params.fabric}%"))
@@ -450,6 +452,7 @@ def _product_to_dict(product: Product) -> dict:
         "fabric": getattr(product, "fabric", None),
         "product_code": getattr(product, "product_code", None),
         "weight": getattr(product, "weight", None),
+        "gender": getattr(product, "gender", None),
     }
 
 

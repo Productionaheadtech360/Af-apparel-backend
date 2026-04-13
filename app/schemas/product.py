@@ -116,6 +116,7 @@ class ProductDetail(BaseModel):
     fabric: str | None = None
     product_code: str | None = None
     weight: str | None = None
+    gender: str | None = None
     
     model_config = {"from_attributes": True}
 
@@ -174,6 +175,7 @@ class ProductUpdate(BaseModel):
     product_code: str | None = None
     weight: str | None = None
     category_ids: list[UUID] | None = None
+    gender: str | None = None
 
 
 class ImageUploadResponse(BaseModel):
