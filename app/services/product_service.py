@@ -57,6 +57,7 @@ class ProductService:
             f"products:list:{params.category}:{params.size}:{params.color}:"
             f"{params.price_min}:{params.price_max}:{params.q}:{params.page}:"
             f"{params.page_size}:{discount_percent}"
+            f"{params.gender}:{params.fabric}:{params.weight}:{params.in_stock}"
         )
         cached = await redis_get(cache_key)
         if cached:
@@ -100,6 +101,17 @@ class ProductService:
             query = query.join(ProductVariant, isouter=True).where(
                 ProductVariant.color == params.color,
                 ProductVariant.status == "active",
+            )
+
+        if params.fabric:
+            query = query.where(Product.fabric.ilike(f"%{params.fabric}%"))
+
+        if params.weight:
+            query = query.where(Product.weight == params.weight)
+
+        if params.in_stock is True:
+            query = query.join(ProductVariant, isouter=True).where(
+                ProductVariant.status == "active"
             )
 
         # Count

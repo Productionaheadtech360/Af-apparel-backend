@@ -33,6 +33,10 @@ async def list_products(
     q: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
+    gender: str | None = None,
+    fabric: str | None = None,
+    weight: str | None = None,
+    in_stock: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     discount_percent = getattr(request.state, "tier_discount_percent", Decimal("0"))
@@ -45,6 +49,10 @@ async def list_products(
         q=q,
         page=page,
         page_size=page_size,
+        gender=gender,
+        fabric=fabric,
+        weight=weight,
+        in_stock=in_stock,
     )
     svc = ProductService(db)
     items, total = await svc.list_with_filters_and_search(params, discount_percent)

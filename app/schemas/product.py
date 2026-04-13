@@ -133,6 +133,10 @@ class FilterParams(BaseModel):
     q: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(24, ge=1, le=100)
+    gender: str | None = None
+    fabric: str | None = None
+    weight: str | None = None
+    in_stock: bool | None = None
 
 
 # ---------------------------------------------------------------------------
