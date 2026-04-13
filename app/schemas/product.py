@@ -85,6 +85,9 @@ class ProductListItem(BaseModel):
     primary_image: ProductImageOut | None = None
     variants: list[VariantOut]
     categories: list[CategoryOut] = []
+    fabric: str | None = None
+    product_code: str | None = None
+    weight: str | None = None
 
     model_config = {"from_attributes": True}
 
