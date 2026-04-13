@@ -161,27 +161,11 @@ class ProductService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    # async def _attach_pricing_and_stock(
-    #     self, products: list[Product], discount_percent: Decimal
-    # ) -> list[Product]:
-    #     from app.services.pricing_service import PricingService
-
-    #     pricing_svc = PricingService(self.db)
-
-    #     for product in products:
-    #         for variant in product.variants:
-    #             variant.effective_price = pricing_svc.calculate_effective_price(
-    #                 variant.retail_price, discount_percent
-    #             )
-    #             # No stock_quantity column on product_variants — default all active variants to 100
-    #             variant.stock_quantity = 100
-
-    #     return products
-
     async def _attach_pricing_and_stock(
         self, products: list[Product], discount_percent: Decimal
     ) -> list[Product]:
         from app.services.pricing_service import PricingService
+
         pricing_svc = PricingService(self.db)
 
         for product in products:
@@ -189,14 +173,8 @@ class ProductService:
                 variant.effective_price = pricing_svc.calculate_effective_price(
                     variant.retail_price, discount_percent
                 )
+                # No stock_quantity column on product_variants — default all active variants to 100
                 variant.stock_quantity = 100
-
-            # ✅ primary_image set karo images list se
-            images = getattr(product, "images", []) or []
-            primary = next((img for img in images if img.is_primary), None)
-            if primary is None and images:
-                primary = images[0]
-            product.primary_image = primary
 
         return products
 
@@ -400,28 +378,8 @@ class ProductService:
         return buf.getvalue()
 
 
-# def _product_to_dict(product: Product) -> dict:
-#     """Serialize a Product ORM object to a plain dict (JSON-safe)."""
-#     return {
-#         "id": str(product.id),
-#         "name": product.name,
-#         "slug": product.slug,
-#         "status": product.status,
-#         "moq": product.moq,
-#         "description": product.description,
-#         "meta_title": getattr(product, "meta_title", None),
-#         "meta_description": getattr(product, "meta_description", None),
-#         "images": [_image_to_dict(i) for i in getattr(product, "images", [])],
-#         "variants": [_variant_to_dict(v) for v in getattr(product, "variants", [])],
-#         "categories": [_cat_to_dict(link.category) for link in getattr(product, "category_links", []) if getattr(link, "category", None)],
-#         "created_at": str(product.created_at),
-#         "updated_at": str(product.updated_at),
-#     }
-
 def _product_to_dict(product: Product) -> dict:
-    images = getattr(product, "images", []) or []
-    primary = next((img for img in images if img.is_primary), None) or (images[0] if images else None)
-    
+    """Serialize a Product ORM object to a plain dict (JSON-safe)."""
     return {
         "id": str(product.id),
         "name": product.name,
@@ -431,8 +389,7 @@ def _product_to_dict(product: Product) -> dict:
         "description": product.description,
         "meta_title": getattr(product, "meta_title", None),
         "meta_description": getattr(product, "meta_description", None),
-        "primary_image": _image_to_dict(primary) if primary else None,  # ✅ add
-        "images": [_image_to_dict(i) for i in images],
+        "images": [_image_to_dict(i) for i in getattr(product, "images", [])],
         "variants": [_variant_to_dict(v) for v in getattr(product, "variants", [])],
         "categories": [_cat_to_dict(link.category) for link in getattr(product, "category_links", []) if getattr(link, "category", None)],
         "created_at": str(product.created_at),
