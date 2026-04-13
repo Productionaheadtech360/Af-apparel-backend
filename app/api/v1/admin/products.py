@@ -1,3 +1,4 @@
+# backend/app/api/v1/admin/products.py
 """Admin products router — full product catalog management with image processing."""
 import io
 import logging
