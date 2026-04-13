@@ -210,7 +210,7 @@ async def _seed_email_templates() -> None:
             await conn.execute(text("""
                 INSERT INTO email_templates 
                 (id, trigger_event, name, subject, body_html, body_text, is_active, available_variables, created_at, updated_at)
-                SELECT gen_random_uuid(), t.trigger_event, t.name, t.subject, t.body_html, t.body_text, true, t.available_variables::jsonb, NOW(), NOW()
+                SELECT gen_random_uuid(), t.trigger_event::email_trigger_event, t.name, t.subject, t.body_html, t.body_text, true, t.available_variables::jsonb, NOW(), NOW()
                 FROM (VALUES
                     (
                         'order_confirmation',
