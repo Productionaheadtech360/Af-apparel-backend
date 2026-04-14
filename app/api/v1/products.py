@@ -223,19 +223,24 @@ async def email_product_flyer(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Queue email task with flyer link
-    from app.tasks.email_tasks import send_order_confirmation_email  # reuse infra pattern
-    # Use generic approach: send via email service directly
+    first_name = getattr(user, "first_name", None) or user.email.split("@")[0]
     from app.services.email_service import EmailService
     svc = EmailService(db)
-    await svc.send(
-        "product_flyer",
-        user.email,
-        {
-            "product_name": product.name,
-            "flyer_url": flyer.url,
-            "user_first_name": user.first_name,
-        },
+    svc.send_raw(
+        to_email=user.email,
+        subject=f"Product Flyer — {product.name}",
+        body_html=f"""
+        <h2 style="font-family:sans-serif;color:#2A2830">Product Flyer</h2>
+        <p>Hi {first_name},</p>
+        <p>Here is the flyer for <strong>{product.name}</strong>:</p>
+        <p>
+          <a href="{flyer.url}" style="background:#1A5CFF;color:#fff;padding:10px 20px;border-radius:6px;
+             text-decoration:none;display:inline-block;font-weight:bold">
+            View / Download Flyer
+          </a>
+        </p>
+        <p style="color:#7A7880;font-size:13px">AF Apparels Wholesale</p>
+        """,
     )
     return {"message": f"Flyer for '{product.name}' sent to {user.email}"}
 

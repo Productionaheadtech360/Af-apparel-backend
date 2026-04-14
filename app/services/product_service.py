@@ -226,6 +226,7 @@ class ProductService:
             fabric=data.fabric,
             product_code=data.product_code,
             weight=data.weight,
+            gender=data.gender,
             status=data.status,
             meta_title=data.meta_title,
             meta_description=data.meta_description,

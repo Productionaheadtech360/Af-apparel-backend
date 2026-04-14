@@ -88,6 +88,7 @@ class ProductListItem(BaseModel):
     fabric: str | None = None
     product_code: str | None = None
     weight: str | None = None
+    gender: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -158,6 +159,7 @@ class ProductCreate(BaseModel):
     fabric: str | None = None
     product_code: str | None = None
     weight: str | None = None
+    gender: str | None = None
     category_ids: list[UUID] = []
 
 
