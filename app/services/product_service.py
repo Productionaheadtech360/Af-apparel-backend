@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import exists, func, or_, select, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,7 +57,8 @@ class ProductService:
             f"products:list:{params.category}:{params.size}:{params.color}:"
             f"{params.price_min}:{params.price_max}:{params.q}:{params.page}:"
             f"{params.page_size}:{discount_percent}"
-            f"{params.gender}:{params.fabric}:{params.weight}:{params.in_stock}"
+            f"{params.gender}:{params.fabric}:{params.weight}:{params.in_stock}:"
+            f"{params.product_code}"
         )
         cached = await redis_get(cache_key)
         if cached:
@@ -115,6 +116,20 @@ class ProductService:
             query = query.join(ProductVariant, isouter=True).where(
                 ProductVariant.status == "active"
             )
+
+        if params.price_min is not None or params.price_max is not None:
+            price_conds = [
+                ProductVariant.product_id == Product.id,
+                ProductVariant.status == "active",
+            ]
+            if params.price_min is not None:
+                price_conds.append(ProductVariant.retail_price >= params.price_min)
+            if params.price_max is not None:
+                price_conds.append(ProductVariant.retail_price <= params.price_max)
+            query = query.where(exists().where(*price_conds))
+
+        if params.product_code:
+            query = query.where(Product.product_code.ilike(f"%{params.product_code}%"))
 
         # Count
         count_query = select(func.count()).select_from(query.subquery())

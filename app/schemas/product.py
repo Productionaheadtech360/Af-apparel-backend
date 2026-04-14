@@ -139,6 +139,7 @@ class FilterParams(BaseModel):
     fabric: str | None = None
     weight: str | None = None
     in_stock: bool | None = None
+    product_code: str | None = None
 
 
 # ---------------------------------------------------------------------------
