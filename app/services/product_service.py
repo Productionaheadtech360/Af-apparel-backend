@@ -469,6 +469,9 @@ def _product_to_dict(product: Product) -> dict:
         "product_code": getattr(product, "product_code", None),
         "weight": getattr(product, "weight", None),
         "gender": getattr(product, "gender", None),
+        "care_instructions": getattr(product, "care_instructions", None),
+        "print_guide": getattr(product, "print_guide", None),
+        "size_chart_data": getattr(product, "size_chart_data", None),
     }
 
 

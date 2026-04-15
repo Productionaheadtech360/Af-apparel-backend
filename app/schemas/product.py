@@ -118,7 +118,10 @@ class ProductDetail(BaseModel):
     product_code: str | None = None
     weight: str | None = None
     gender: str | None = None
-    
+    care_instructions: str | None = None
+    print_guide: dict | None = None
+    size_chart_data: list | None = None
+
     model_config = {"from_attributes": True}
 
 
@@ -179,6 +182,9 @@ class ProductUpdate(BaseModel):
     weight: str | None = None
     category_ids: list[UUID] | None = None
     gender: str | None = None
+    care_instructions: str | None = None
+    print_guide: dict | None = None
+    size_chart_data: list | None = None
 
 
 class ImageUploadResponse(BaseModel):
