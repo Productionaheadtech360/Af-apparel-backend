@@ -380,6 +380,17 @@ async def get_full_profile(request: Request, db: AsyncSession = Depends(get_db))
             "ppac_number": company.ppac_number,
             "ppai_number": company.ppai_number,
             "asi_number": company.asi_number,
+            # Registration form fields
+            "company_email": getattr(company, "company_email", None),
+            "address_line1": getattr(company, "address_line1", None),
+            "address_line2": getattr(company, "address_line2", None),
+            "city": getattr(company, "city", None),
+            "state_province": getattr(company, "state_province", None),
+            "postal_code": getattr(company, "postal_code", None),
+            "country": getattr(company, "country", None),
+            "how_heard": getattr(company, "how_heard", None),
+            "num_employees": getattr(company, "num_employees", None),
+            "num_sales_reps": getattr(company, "num_sales_reps", None),
         } if company else None,
     }
 

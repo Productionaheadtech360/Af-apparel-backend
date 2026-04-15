@@ -3,7 +3,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -63,7 +63,12 @@ class Product(BaseModel):
     product_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     weight: Mapped[str | None] = mapped_column(String(100), nullable=True)
     gender: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    
+
+    # Tab content fields
+    care_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    print_guide: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    size_chart_data: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Full-text search vector (updated via PostgreSQL trigger)
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
 

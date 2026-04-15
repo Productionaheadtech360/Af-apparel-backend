@@ -171,6 +171,23 @@ class AuthService:
             email=data.email.lower(),
             phone=data.phone,
             status="pending",
+            # Extended registration fields
+            company_email=getattr(data, "company_email", None),
+            address_line1=getattr(data, "address_line1", None),
+            address_line2=getattr(data, "address_line2", None),
+            city=getattr(data, "city", None),
+            state_province=getattr(data, "state_province", None),
+            postal_code=getattr(data, "postal_code", None),
+            country=getattr(data, "country", None),
+            how_heard=getattr(data, "how_heard", None),
+            num_employees=getattr(data, "num_employees", None),
+            num_sales_reps=getattr(data, "num_sales_reps", None),
+            secondary_business=getattr(data, "secondary_business", None),
+            estimated_annual_volume=getattr(data, "estimated_annual_volume", None),
+            ppac_number=getattr(data, "ppac_number", None),
+            ppai_number=getattr(data, "ppai_number", None),
+            asi_number=getattr(data, "asi_number", None),
+            fax=getattr(data, "fax", None),
         )
         self.db.add(application)
         await self.db.flush()

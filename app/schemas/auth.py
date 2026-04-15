@@ -20,6 +20,24 @@ class RegisterWholesaleRequest(BaseModel):
     website: str | None = Field(None, max_length=500)
     expected_monthly_volume: str | None = None
 
+    # Extended company info (registration form)
+    fax: str | None = Field(None, max_length=50)
+    secondary_business: str | None = Field(None, max_length=255)
+    estimated_annual_volume: str | None = Field(None, max_length=100)
+    ppac_number: str | None = Field(None, max_length=100)
+    ppai_number: str | None = Field(None, max_length=100)
+    asi_number: str | None = Field(None, max_length=100)
+    company_email: str | None = Field(None, max_length=255)
+    address_line1: str | None = Field(None, max_length=255)
+    address_line2: str | None = Field(None, max_length=255)
+    city: str | None = Field(None, max_length=100)
+    state_province: str | None = Field(None, max_length=100)
+    postal_code: str | None = Field(None, max_length=20)
+    country: str | None = Field(None, max_length=100)
+    how_heard: str | None = Field(None, max_length=100)
+    num_employees: str | None = Field(None, max_length=50)
+    num_sales_reps: str | None = Field(None, max_length=50)
+
     # Contact info
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)

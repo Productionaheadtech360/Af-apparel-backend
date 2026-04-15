@@ -67,6 +67,24 @@ class WholesaleService:
             pricing_tier_id=data.pricing_tier_id,
             shipping_tier_id=data.shipping_tier_id,
             admin_notes=data.admin_notes,
+            # Copy extended registration fields from application
+            phone=getattr(application, "phone", None),
+            fax=getattr(application, "fax", None),
+            company_email=getattr(application, "company_email", None),
+            address_line1=getattr(application, "address_line1", None),
+            address_line2=getattr(application, "address_line2", None),
+            city=getattr(application, "city", None),
+            state_province=getattr(application, "state_province", None),
+            postal_code=getattr(application, "postal_code", None),
+            country=getattr(application, "country", None),
+            how_heard=getattr(application, "how_heard", None),
+            num_employees=getattr(application, "num_employees", None),
+            num_sales_reps=getattr(application, "num_sales_reps", None),
+            secondary_business=getattr(application, "secondary_business", None),
+            estimated_annual_volume=getattr(application, "estimated_annual_volume", None),
+            ppac_number=getattr(application, "ppac_number", None),
+            ppai_number=getattr(application, "ppai_number", None),
+            asi_number=getattr(application, "asi_number", None),
         )
         self.db.add(company)
         await self.db.flush()

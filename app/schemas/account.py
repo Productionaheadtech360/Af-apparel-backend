@@ -37,6 +37,17 @@ class CompanyProfileUpdate(BaseModel):
     ppac_number: str | None = None
     ppai_number: str | None = None
     asi_number: str | None = None
+    # Registration form fields
+    company_email: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state_province: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    how_heard: str | None = None
+    num_employees: str | None = None
+    num_sales_reps: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

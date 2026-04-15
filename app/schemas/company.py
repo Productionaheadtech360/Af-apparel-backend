@@ -25,6 +25,23 @@ class CompanyDetail(BaseModel):
     business_type: str | None
     website: str | None
     phone: str | None = None
+    fax: str | None = None
+    secondary_business: str | None = None
+    estimated_annual_volume: str | None = None
+    ppac_number: str | None = None
+    ppai_number: str | None = None
+    asi_number: str | None = None
+    # Registration fields
+    company_email: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state_province: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    how_heard: str | None = None
+    num_employees: str | None = None
+    num_sales_reps: str | None = None
     pricing_tier_id: UUID | None
     shipping_tier_id: UUID | None
     shipping_override_amount: Decimal | None

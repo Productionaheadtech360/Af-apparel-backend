@@ -63,6 +63,18 @@ class Company(BaseModel):
     ppai_number: Mapped[str | None] = mapped_column(String(100))
     asi_number: Mapped[str | None] = mapped_column(String(100))
 
+    # Registration-form fields (added from wholesale application form)
+    company_email: Mapped[str | None] = mapped_column(String(255))
+    address_line1: Mapped[str | None] = mapped_column(String(255))
+    address_line2: Mapped[str | None] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(100))
+    state_province: Mapped[str | None] = mapped_column(String(100))
+    postal_code: Mapped[str | None] = mapped_column(String(20))
+    country: Mapped[str | None] = mapped_column(String(100))
+    how_heard: Mapped[str | None] = mapped_column(String(100))
+    num_employees: Mapped[str | None] = mapped_column(String(50))
+    num_sales_reps: Mapped[str | None] = mapped_column(String(50))
+
     # Notes & Tags
     admin_notes: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSONB, default=list, server_default="'[]'::jsonb")
