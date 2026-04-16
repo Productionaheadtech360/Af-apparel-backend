@@ -57,6 +57,7 @@ class CheckoutConfirmRequest(BaseModel):
 
     address_id: UUID | None = None
     shipping_address: AddressIn | None = None
+    shipping_method: str | None = None   # "standard" | "expedited" | "freight"
     po_number: str | None = None
     order_notes: str | None = None
 

@@ -189,6 +189,7 @@ from app.core.exceptions import AppException
 from app.core.redis import check_redis_connection
 from app.middleware.audit_middleware import AuditMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
+from app.middleware.pricing_middleware import PricingMiddleware
 
 
 # ── Sentry ────────────────────────────────────────────────────────────────────
@@ -320,6 +321,9 @@ app = FastAPI(
 
 # ── Custom middleware ─────────────────────────────────────────────────────────
 app.add_middleware(AuditMiddleware)
+# PricingMiddleware must be added BEFORE AuthMiddleware so it runs AFTER Auth
+# (last added = outermost = runs first on request; so Auth → Pricing → Audit → routes)
+app.add_middleware(PricingMiddleware)
 app.add_middleware(AuthMiddleware)
 
 
@@ -374,9 +378,6 @@ from app.api.v1.admin import (  # noqa: E402
     products as admin_products,
     inventory as admin_inventory,
 )
-from app.middleware.pricing_middleware import PricingMiddleware  # noqa: E402
-
-app.add_middleware(PricingMiddleware)
 
 _cors_origins = list({settings.FRONTEND_URL, *settings.allowed_origins_list} - {""})
 app.add_middleware(
