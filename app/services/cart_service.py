@@ -36,6 +36,7 @@ class CartService:
             item_count=len(items),
             total_units=total_units,
             validation=validation,
+            discount_percent=discount_percent,
         )
 
     # ------------------------------------------------------------------

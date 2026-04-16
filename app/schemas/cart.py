@@ -51,6 +51,7 @@ class CartResponse(BaseModel):
     item_count: int
     total_units: int
     validation: CartValidation
+    discount_percent: Decimal = Decimal("0")
 
     model_config = {"from_attributes": True}
 
