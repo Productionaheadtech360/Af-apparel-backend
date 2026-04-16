@@ -140,6 +140,16 @@ class AdminOrderDetail(OrderOut):
     courier_service: str | None = None
     shipped_at: datetime | None = None
     qb_invoice_id: str | None
+    # Customer contact (enriched from User record)
+    customer_name: str | None = None
+    customer_email: str | None = None
+    customer_phone: str | None = None
+    # Shipping address parsed from snapshot
+    shipping_address: dict | None = None
+    # Order financials
+    tax_amount: Decimal | None = None
+    payment_method: str | None = None
+    pricing_tier: str | None = None
 
     model_config = {"from_attributes": True}
 

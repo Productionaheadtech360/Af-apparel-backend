@@ -1,7 +1,8 @@
 """Admin — order management and RMA."""
 import csv
 import io
-from datetime import datetime, timezone
+import json as _json
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,7 @@ from app.core.database import get_db
 from app.core.exceptions import NotFoundError
 from app.models.company import Company
 from app.models.order import Order, OrderItem
+from app.models.user import User
 from app.models.rma import RMAItem, RMARequest
 from app.schemas.order import (
     AdminOrderDetail,
@@ -105,12 +107,66 @@ async def _send_order_status_email(order: Order, new_status: str, db: AsyncSessi
 # Orders
 # ---------------------------------------------------------------------------
 
+@router.post("/orders/draft", status_code=201)
+async def create_draft_order(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create an empty draft (pending) order for admin to fill in."""
+    from uuid import UUID as _UUID
+    from app.models.company import Company as _Company, CompanyUser as _CompanyUser
+    import string, random
+
+    company_id_str = payload.get("company_id")
+    if not company_id_str:
+        raise HTTPException(status_code=422, detail="company_id is required")
+
+    company_id = _UUID(str(company_id_str))
+
+    # Verify company exists
+    company = (await db.execute(select(_Company).where(_Company.id == company_id))).scalar_one_or_none()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Find an owner/user for placed_by_id (required FK)
+    member = (await db.execute(
+        select(_CompanyUser).where(_CompanyUser.company_id == company_id, _CompanyUser.is_active == True)
+        .limit(1)
+    )).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=422, detail="Company has no active users — add a user first")
+
+    # Generate order number
+    suffix = "".join(random.choices(string.digits, k=6))
+    order_number = f"DRAFT-{suffix}"
+
+    order = Order(
+        company_id=company_id,
+        placed_by_id=member.user_id,
+        order_number=order_number,
+        status="pending",
+        payment_status="unpaid",
+        po_number=payload.get("po_number"),
+        notes=payload.get("notes"),
+        subtotal=0,
+        shipping_cost=0,
+        tax_amount=0,
+        total=0,
+    )
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
+    return {"id": str(order.id), "order_number": order.order_number}
+
+
 @router.get("/orders", response_model=PaginatedResponse[AdminOrderListItem])
 async def list_admin_orders(
     q: str | None = None,
     status: str | None = None,
     payment_status: str | None = None,
     company_id: str | None = None,
+    date_from: date | None = Query(None, description="Filter orders created on or after this date"),
+    date_to: date | None = Query(None, description="Filter orders created on or before this date"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -128,6 +184,10 @@ async def list_admin_orders(
         query = query.where(Order.payment_status == payment_status)
     if company_id:
         query = query.where(Order.company_id == company_id)
+    if date_from:
+        query = query.where(Order.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        query = query.where(Order.created_at <= datetime.combine(date_to, datetime.max.time()))
 
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar_one()
@@ -208,6 +268,39 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
     items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
     items = items_result.scalars().all()
 
+    # Enrich with customer contact from placing user
+    customer_name: str | None = None
+    customer_email: str | None = None
+    customer_phone: str | None = None
+    try:
+        user_result = await db.execute(select(User).where(User.id == order.placed_by_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            customer_name = f"{user.first_name} {user.last_name}".strip() or None
+            customer_email = user.email
+            customer_phone = user.phone
+    except Exception:
+        pass
+
+    # Parse shipping address snapshot
+    shipping_address: dict | None = None
+    if order.shipping_address_snapshot:
+        try:
+            raw = _json.loads(order.shipping_address_snapshot)
+            # Normalize to frontend-expected keys
+            shipping_address = {
+                "full_name": raw.get("full_name") or raw.get("label"),
+                "address_line1": raw.get("address_line1") or raw.get("line1"),
+                "address_line2": raw.get("address_line2") or raw.get("line2"),
+                "city": raw.get("city"),
+                "state": raw.get("state"),
+                "postal_code": raw.get("postal_code"),
+                "zip_code": raw.get("postal_code"),
+                "country": raw.get("country"),
+            }
+        except Exception:
+            pass
+
     return AdminOrderDetail(
         id=order.id,
         order_number=order.order_number,
@@ -217,6 +310,7 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
         order_notes=order.notes,
         subtotal=order.subtotal,
         shipping_cost=order.shipping_cost,
+        tax_amount=order.tax_amount,
         total=order.total,
         company_id=order.company_id,
         company_name=company_name,
@@ -228,6 +322,10 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
         created_at=order.created_at,
         updated_at=order.updated_at,
         items=[OrderItemOut.model_validate(i) for i in items],
+        customer_name=customer_name,
+        customer_email=customer_email,
+        customer_phone=customer_phone,
+        shipping_address=shipping_address,
     )
 
 

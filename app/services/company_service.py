@@ -6,8 +6,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.models.company import Company
+from app.models.company import Company, CompanyUser
 from app.models.order import Order
+from app.models.user import User
 from app.schemas.company import CompanyUpdate, SuspendRequest
 
 
@@ -67,10 +68,35 @@ class CompanyService:
         result = await self.db.execute(query)
         rows = result.all()
 
+        # Fetch owner user info for each company in one batch query
+        company_ids = [row[0].id for row in rows]
+        owner_map: dict = {}
+        if company_ids:
+            owner_result = await self.db.execute(
+                select(CompanyUser.company_id, User.email, User.first_name, User.last_name, User.phone)
+                .join(User, CompanyUser.user_id == User.id)
+                .where(CompanyUser.company_id.in_(company_ids), CompanyUser.role == "owner", CompanyUser.is_active == True)
+            )
+            for comp_id, email, first, last, phone in owner_result.all():
+                owner_map[comp_id] = {
+                    "email": email,
+                    "phone": phone,
+                    "contact_name": f"{first} {last}".strip() or None,
+                }
+
+        # Fetch last order date per company
+        last_order_result = await self.db.execute(
+            select(Order.company_id, func.max(Order.created_at).label("last_order_date"))
+            .where(Order.company_id.in_(company_ids))
+            .group_by(Order.company_id)
+        )
+        last_order_map = {row[0]: row[1] for row in last_order_result.all()}
+
         # Build list of dicts that match CompanyListItem schema
         companies = []
         for row in rows:
             company = row[0]
+            owner = owner_map.get(company.id, {})
             companies.append({
                 "id": company.id,
                 "name": company.name,
@@ -80,6 +106,10 @@ class CompanyService:
                 "order_count": int(row[1]),
                 "total_spend": Decimal(str(row[2])),
                 "created_at": company.created_at,
+                "email": owner.get("email"),
+                "phone": owner.get("phone"),
+                "contact_name": owner.get("contact_name"),
+                "last_order_date": last_order_map.get(company.id),
             })
         return companies, total
 

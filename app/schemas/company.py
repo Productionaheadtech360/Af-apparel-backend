@@ -13,6 +13,11 @@ class CompanyListItem(BaseModel):
     order_count: int = 0
     total_spend: Decimal = Decimal("0")
     created_at: datetime
+    # Contact info (enriched from owner user)
+    email: str | None = None
+    phone: str | None = None
+    contact_name: str | None = None
+    last_order_date: datetime | None = None
 
     model_config = {"from_attributes": True}
 
