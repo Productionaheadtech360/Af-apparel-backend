@@ -19,22 +19,22 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ── Companies: registration form fields ─────────────────────────────────
-    op.add_column("companies", sa.Column("company_email", sa.String(255), nullable=True))
-    op.add_column("companies", sa.Column("address_line1", sa.String(255), nullable=True))
-    op.add_column("companies", sa.Column("address_line2", sa.String(255), nullable=True))
-    op.add_column("companies", sa.Column("city", sa.String(100), nullable=True))
-    op.add_column("companies", sa.Column("state_province", sa.String(100), nullable=True))
-    op.add_column("companies", sa.Column("postal_code", sa.String(20), nullable=True))
-    op.add_column("companies", sa.Column("country", sa.String(100), nullable=True))
-    op.add_column("companies", sa.Column("how_heard", sa.String(100), nullable=True))
-    op.add_column("companies", sa.Column("num_employees", sa.String(50), nullable=True))
-    op.add_column("companies", sa.Column("num_sales_reps", sa.String(50), nullable=True))
+    # ── Companies: registration form fields (IF NOT EXISTS — idempotent) ─────
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS company_email VARCHAR(255)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS address_line1 VARCHAR(255)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS address_line2 VARCHAR(255)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS city VARCHAR(100)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS state_province VARCHAR(100)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS country VARCHAR(100)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS how_heard VARCHAR(100)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS num_employees VARCHAR(50)")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS num_sales_reps VARCHAR(50)")
 
-    # ── Products: tab content fields ─────────────────────────────────────────
-    op.add_column("products", sa.Column("care_instructions", sa.Text(), nullable=True))
-    op.add_column("products", sa.Column("print_guide", JSONB(), nullable=True))
-    op.add_column("products", sa.Column("size_chart_data", JSONB(), nullable=True))
+    # ── Products: tab content fields (IF NOT EXISTS — idempotent) ────────────
+    op.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS care_instructions TEXT")
+    op.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS print_guide JSONB")
+    op.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS size_chart_data JSONB")
 
 
 def downgrade() -> None:

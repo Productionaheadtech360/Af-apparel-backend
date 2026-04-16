@@ -16,22 +16,22 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("wholesale_applications", sa.Column("company_email", sa.String(255), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("address_line1", sa.String(255), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("address_line2", sa.String(255), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("city", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("state_province", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("postal_code", sa.String(20), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("country", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("how_heard", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("num_employees", sa.String(50), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("num_sales_reps", sa.String(50), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("secondary_business", sa.String(255), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("estimated_annual_volume", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("ppac_number", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("ppai_number", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("asi_number", sa.String(100), nullable=True))
-    op.add_column("wholesale_applications", sa.Column("fax", sa.String(50), nullable=True))
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS company_email VARCHAR(255)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS address_line1 VARCHAR(255)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS address_line2 VARCHAR(255)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS city VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS state_province VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS country VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS how_heard VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS num_employees VARCHAR(50)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS num_sales_reps VARCHAR(50)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS secondary_business VARCHAR(255)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS estimated_annual_volume VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS ppac_number VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS ppai_number VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS asi_number VARCHAR(100)")
+    op.execute("ALTER TABLE wholesale_applications ADD COLUMN IF NOT EXISTS fax VARCHAR(50)")
 
 
 def downgrade() -> None:
