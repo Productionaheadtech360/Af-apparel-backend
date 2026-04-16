@@ -231,10 +231,23 @@ class CartService:
         discount_percent: Decimal = Decimal("0"),
     ) -> int:
         """Upsert all valid items into cart. Returns count of items added."""
+        from app.services.pricing_service import PricingService
+        pricing_svc = PricingService(self.db)
+
         added = 0
         for item in valid_items:
             variant_id = UUID(item["variant_id"]) if isinstance(item["variant_id"], str) else item["variant_id"]
             qty = item["quantity"]
+
+            variant_result = await self.db.execute(
+                select(ProductVariant).where(ProductVariant.id == variant_id)
+            )
+            variant = variant_result.scalar_one_or_none()
+            effective_price = (
+                pricing_svc.calculate_effective_price(variant.retail_price, discount_percent)
+                if variant else Decimal("0")
+            )
+
             existing = (await self.db.execute(
                 select(CartItem).where(
                     CartItem.company_id == company_id,
@@ -243,11 +256,13 @@ class CartService:
             )).scalar_one_or_none()
             if existing:
                 existing.quantity += qty
+                existing.unit_price = effective_price
             else:
                 self.db.add(CartItem(
                     company_id=company_id,
                     variant_id=variant_id,
                     quantity=qty,
+                    unit_price=effective_price,
                 ))
             added += 1
         await self.db.flush()
@@ -288,7 +303,14 @@ class CartService:
             )
             stock = stock_result.scalar_one()
 
-            line_total = item.unit_price * item.quantity
+            # Re-apply discount from retail_price so the cart always reflects
+            # the current tier — even if items were added before a tier was assigned.
+            from app.services.pricing_service import PricingService
+            pricing_svc = PricingService(self.db)
+            effective_price = pricing_svc.calculate_effective_price(
+                variant.retail_price, discount_percent
+            )
+            line_total = effective_price * item.quantity
             moq_satisfied = item.quantity >= product.moq
 
             items.append(
@@ -301,7 +323,7 @@ class CartService:
                     color=variant.color,
                     size=variant.size,
                     quantity=item.quantity,
-                    unit_price=item.unit_price,
+                    unit_price=effective_price,
                     line_total=line_total,
                     moq=product.moq,
                     moq_satisfied=moq_satisfied,
