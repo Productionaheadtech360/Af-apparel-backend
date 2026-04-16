@@ -249,6 +249,60 @@ async def list_payment_methods(request: Request, db: AsyncSession = Depends(get_
         return []
 
 
+@router.post("/payment-methods", status_code=status.HTTP_201_CREATED)
+async def add_payment_method(
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a new card to the QB customer wallet from raw card fields."""
+    company_id = getattr(request.state, "company_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+    from app.models.company import Company
+    from app.services.qb_payments_service import QBPaymentsService
+    import uuid as _uuid
+
+    company = (await db.execute(select(Company).where(Company.id == company_id))).scalar_one_or_none()
+    if not company:
+        raise ForbiddenError("Company not found")
+
+    svc = QBPaymentsService()
+
+    # Ensure the company has a QB customer profile
+    if not company.qb_customer_id:
+        qb_id = svc.create_customer(str(_uuid.uuid4()))
+        company.qb_customer_id = qb_id
+        await db.commit()
+        await db.refresh(company)
+
+    card = payload.get("card", {})
+    try:
+        saved = svc.save_card(
+            customer_id=company.qb_customer_id,
+            card_number=card.get("number", ""),
+            exp_month=card.get("expMonth", ""),
+            exp_year=card.get("expYear", ""),
+            cvc=card.get("cvc", ""),
+            name=card.get("name") or None,
+        )
+        # Set as default if no default exists
+        if not company.default_payment_method_id:
+            company.default_payment_method_id = saved.get("id")
+            await db.commit()
+        return {
+            "id": saved.get("id"),
+            "brand": saved.get("cardType", "Unknown"),
+            "last4": (saved.get("number") or "")[-4:] or "****",
+            "exp_month": saved.get("expMonth"),
+            "exp_year": saved.get("expYear"),
+            "name": saved.get("name"),
+            "is_default": not company.default_payment_method_id or company.default_payment_method_id == saved.get("id"),
+        }
+    except Exception as exc:
+        raise ForbiddenError(f"Failed to save card: {exc}")
+
+
 @router.patch("/payment-methods/{payment_method_id}/set-default")
 async def set_default_payment_method(
     payment_method_id: str,

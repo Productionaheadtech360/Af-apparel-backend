@@ -73,6 +73,25 @@ class AuthService:
                 company: Company = membership.company
                 if company.status == "suspended":
                     raise AccountSuspendedError()
+            else:
+                # No company membership — check if they have a wholesale application
+                app_result = await self.db.execute(
+                    select(WholesaleApplication)
+                    .where(WholesaleApplication.email == user.email)
+                    .order_by(WholesaleApplication.created_at.desc())
+                    .limit(1)
+                )
+                application = app_result.scalar_one_or_none()
+                if application and application.status == "pending":
+                    raise UnauthorizedError(
+                        "Your wholesale application is pending review. "
+                        "You will receive an email once your account is approved."
+                    )
+                elif application and application.status == "rejected":
+                    raise UnauthorizedError(
+                        "Your wholesale application was not approved. "
+                        "Please contact us at (214) 272-7213 for more information."
+                    )
 
         # Update last_login
         user.last_login = datetime.now(UTC)

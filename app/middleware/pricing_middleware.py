@@ -32,7 +32,23 @@ class PricingMiddleware:
 
         request = Request(scope)
         tier_id = getattr(request.state, "pricing_tier_id", None)
+        company_id = getattr(request.state, "company_id", None)
         discount_percent = Decimal("0")
+
+        # If no tier_id baked into the JWT (e.g. tier was assigned after last login),
+        # fall back to a live DB lookup using company_id.
+        if not tier_id and company_id:
+            try:
+                from app.models.company import Company
+                from sqlalchemy import select
+                async with async_session_factory() as session:
+                    row = await session.scalar(
+                        select(Company.pricing_tier_id).where(Company.id == company_id)
+                    )
+                    if row:
+                        tier_id = str(row)
+            except Exception:
+                pass
 
         if tier_id:
             cache_key = f"{_CACHE_PREFIX}{tier_id}:discount"

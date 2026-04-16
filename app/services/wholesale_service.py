@@ -110,12 +110,47 @@ class WholesaleService:
         application.admin_notes = data.admin_notes
         await self.db.flush()
 
-        # Queue QB customer sync and welcome email
-        from app.tasks.email_tasks import send_wholesale_approved_email
-        from app.tasks.quickbooks_tasks import sync_customer_to_qb
+        # Send approval email directly (synchronous, non-fatal)
+        from app.services.email_service import EmailService
+        from app.core.config import settings as _settings
+        email_svc = EmailService(self.db)
+        try:
+            email_svc.send_raw(
+                to_email=application.email,
+                subject="Your Wholesale Account Has Been Approved — AF Apparels",
+                body_html=f"""
+                <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                  <div style="background:#080808;padding:24px;text-align:center">
+                    <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
+                    <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
+                    <span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>
+                  </div>
+                  <div style="padding:32px;background:#fff">
+                    <h2 style="color:#059669">Account Approved! ✅</h2>
+                    <p>Hi {application.first_name},</p>
+                    <p>Great news! Your wholesale account for <b>{application.company_name}</b> has been approved.</p>
+                    <p>You can now log in to the AF Apparels wholesale portal and start placing orders.</p>
+                    <p style="margin:24px 0">
+                      <a href="{_settings.FRONTEND_URL}/login"
+                         style="background:#E8242A;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;display:inline-block">
+                        Log In to Your Account →
+                      </a>
+                    </p>
+                    <p style="color:#6b7280;font-size:13px">Questions? Call us at (214) 272-7213</p>
+                    <p>— AF Apparels Team</p>
+                  </div>
+                </div>
+                """,
+            )
+        except Exception:
+            pass  # non-fatal — approval still goes through
 
-        send_wholesale_approved_email.delay(str(application.id), str(company.id))
-        sync_customer_to_qb.delay(str(company.id))
+        # QB customer sync (Celery — non-fatal if Celery is down)
+        try:
+            from app.tasks.quickbooks_tasks import sync_customer_to_qb
+            sync_customer_to_qb.delay(str(company.id))
+        except Exception:
+            pass
 
         return company
 
