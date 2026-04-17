@@ -317,7 +317,7 @@ class CartService:
             img_result = await self.db.execute(
                 select(ProductImage)
                 .where(ProductImage.product_id == product.id)
-                .order_by(ProductImage.position)
+                .order_by(ProductImage.sort_order)
                 .limit(1)
             )
             primary_img = img_result.scalar_one_or_none()

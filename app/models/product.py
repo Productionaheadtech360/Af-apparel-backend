@@ -90,7 +90,6 @@ class Product(BaseModel):
     )
     reviews: Mapped[list["ProductReview"]] = relationship(
         "ProductReview", back_populates="product", cascade="all, delete-orphan",
-        order_by="ProductReview.created_at.desc()",
     )
 
     # ── Computed properties for schema compatibility ───────────────────────────
