@@ -329,6 +329,88 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/orders/{order_id}/items", status_code=201)
+async def add_order_item(
+    order_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Add a line item to a pending/draft order."""
+    from uuid import UUID as _UUID
+    from app.models.product import ProductVariant
+
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status not in ("pending", "confirmed"):
+        raise HTTPException(status_code=422, detail="Can only add items to pending orders")
+
+    variant_id_str = payload.get("variant_id")
+    quantity = int(payload.get("quantity", 1))
+    if not variant_id_str or quantity < 1:
+        raise HTTPException(status_code=422, detail="variant_id and quantity required")
+
+    variant_id = _UUID(str(variant_id_str))
+    variant = (await db.execute(
+        select(ProductVariant).where(ProductVariant.id == variant_id)
+    )).scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Product variant not found")
+
+    # Use provided unit_price or fall back to variant retail price
+    unit_price = float(payload.get("unit_price") or variant.retail_price or 0)
+    line_total = unit_price * quantity
+
+    # Fetch product info for denormalized fields
+    from app.models.product import Product
+    product = (await db.execute(
+        select(Product).where(Product.id == variant.product_id)
+    )).scalar_one_or_none()
+
+    item = OrderItem(
+        order_id=order_id,
+        variant_id=variant_id,
+        quantity=quantity,
+        unit_price=unit_price,
+        line_total=line_total,
+        product_name=product.name if product else "Unknown",
+        sku=variant.sku or "",
+        color=variant.color,
+        size=variant.size,
+    )
+    db.add(item)
+
+    # Recalculate order totals
+    order.subtotal = float(order.subtotal or 0) + line_total
+    order.total = float(order.subtotal) + float(order.shipping_cost or 0) + float(order.tax_amount or 0)
+
+    await db.commit()
+    return {"message": "Item added", "item_id": str(item.id), "subtotal": float(order.subtotal), "total": float(order.total)}
+
+
+@router.delete("/orders/{order_id}/items/{item_id}", status_code=200)
+async def remove_order_item(
+    order_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Remove a line item from a pending/draft order."""
+    item = (await db.execute(
+        select(OrderItem).where(OrderItem.id == item_id, OrderItem.order_id == order_id)
+    )).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if order and order.status in ("pending", "confirmed"):
+        order.subtotal = max(0, float(order.subtotal or 0) - float(item.line_total or 0))
+        order.total = float(order.subtotal) + float(order.shipping_cost or 0) + float(order.tax_amount or 0)
+
+    await db.delete(item)
+    await db.commit()
+    return {"message": "Item removed"}
+
+
 @router.patch("/orders/{order_id}", response_model=dict)
 async def update_admin_order(
     order_id: UUID,
