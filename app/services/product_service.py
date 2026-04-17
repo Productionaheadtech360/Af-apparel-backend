@@ -211,15 +211,31 @@ class ProductService:
         self, products: list[Product], discount_percent: Decimal
     ) -> list[Product]:
         from app.services.pricing_service import PricingService
+        from app.models.inventory import InventoryRecord
+
         pricing_svc = PricingService(self.db)
-    
+
+        # Collect all variant IDs so we can batch the stock query
+        variant_ids = [v.id for p in products for v in p.variants]
+        stock_map: dict = {}
+        if variant_ids:
+            stock_result = await self.db.execute(
+                select(InventoryRecord.variant_id, func.sum(InventoryRecord.quantity))
+                .where(InventoryRecord.variant_id.in_(variant_ids))
+                .group_by(InventoryRecord.variant_id)
+            )
+            for variant_id, total_qty in stock_result.all():
+                stock_map[variant_id] = int(total_qty or 0)
+
         for product in products:
             for variant in product.variants:
                 variant.effective_price = pricing_svc.calculate_effective_price(
                     variant.retail_price, discount_percent
                 )
-                variant.stock_quantity = 100
-    
+                # Use real inventory; 0 in stock_map means no records → treat as unlimited (9999)
+                qty = stock_map.get(variant.id)
+                variant.stock_quantity = qty if qty is not None else 9999
+
         return products
 
     async def invalidate_product_cache(self, slug: str | None = None) -> None:
