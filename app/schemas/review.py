@@ -9,6 +9,7 @@ class ProductReviewCreate(BaseModel):
     body: str = Field(..., min_length=10, max_length=2000)
     reviewer_name: str = Field(..., min_length=1, max_length=150)
     reviewer_company: str | None = Field(None, max_length=150)
+    image_url: str | None = Field(None, max_length=1000)
 
 
 class ProductReviewOut(BaseModel):
@@ -20,6 +21,7 @@ class ProductReviewOut(BaseModel):
     reviewer_name: str
     reviewer_company: str | None
     is_verified: bool
+    image_url: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

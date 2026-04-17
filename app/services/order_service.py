@@ -183,6 +183,23 @@ class OrderService:
             )
             self.db.add(order_item)
 
+        # 9.5. Deduct inventory for each ordered variant
+        for item_data in order_items_data:
+            variant_id = item_data["variant_id"]
+            qty_to_deduct = item_data["quantity"]
+            inv_result = await self.db.execute(
+                select(InventoryRecord)
+                .where(InventoryRecord.variant_id == variant_id)
+                .order_by(InventoryRecord.quantity.desc())
+            )
+            inv_records = inv_result.scalars().all()
+            for record in inv_records:
+                if qty_to_deduct <= 0:
+                    break
+                deduct = min(record.quantity, qty_to_deduct)
+                record.quantity -= deduct
+                qty_to_deduct -= deduct
+
         # 10. Clear cart
         from sqlalchemy import delete
         await self.db.execute(

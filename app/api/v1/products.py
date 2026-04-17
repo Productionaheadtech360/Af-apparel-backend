@@ -315,6 +315,7 @@ async def create_product_review(
         reviewer_company=payload.reviewer_company,
         is_verified=user_id is not None,
         is_approved=True,
+        image_url=payload.image_url,
     )
     db.add(review)
     await db.commit()

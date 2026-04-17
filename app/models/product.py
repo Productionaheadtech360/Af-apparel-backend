@@ -221,5 +221,6 @@ class ProductReview(BaseModel):
     reviewer_company: Mapped[str | None] = mapped_column(String(150), nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     product: Mapped["Product"] = relationship("Product", back_populates="reviews")
