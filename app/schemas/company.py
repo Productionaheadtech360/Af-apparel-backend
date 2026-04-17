@@ -54,6 +54,7 @@ class CompanyDetail(BaseModel):
     qb_customer_id: str | None
     admin_notes: str | None = None
     tags: list[str] = []
+    discount_percent: Decimal | None = None
     created_at: datetime
     updated_at: datetime
 

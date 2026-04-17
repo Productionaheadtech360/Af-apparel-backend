@@ -88,6 +88,10 @@ class Product(BaseModel):
     category_links: Mapped[list["ProductCategory"]] = relationship(
         "ProductCategory", back_populates="product", cascade="all, delete-orphan"
     )
+    reviews: Mapped[list["ProductReview"]] = relationship(
+        "ProductReview", back_populates="product", cascade="all, delete-orphan",
+        order_by="ProductReview.created_at.desc()",
+    )
 
     # ── Computed properties for schema compatibility ───────────────────────────
     @property
@@ -198,3 +202,25 @@ class ProductCategory(BaseModel):
 
     product: Mapped["Product"] = relationship("Product", back_populates="category_links")
     category: Mapped["Category"] = relationship("Category", back_populates="product_links")
+
+
+class ProductReview(BaseModel):
+    """Customer reviews for products."""
+
+    __tablename__ = "product_reviews"
+
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewer_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    reviewer_company: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    product: Mapped["Product"] = relationship("Product", back_populates="reviews")

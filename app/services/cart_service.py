@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.order import CartItem, OrderTemplate
-from app.models.product import Product, ProductVariant
+from app.models.product import Product, ProductImage, ProductVariant
 from app.models.inventory import InventoryRecord
 from app.schemas.cart import CartItemOut, CartResponse, CartValidation, MatrixAddRequest
 
@@ -313,16 +313,35 @@ class CartService:
             line_total = effective_price * item.quantity
             moq_satisfied = item.quantity >= product.moq
 
+            # Primary product image
+            img_result = await self.db.execute(
+                select(ProductImage)
+                .where(ProductImage.product_id == product.id)
+                .order_by(ProductImage.position)
+                .limit(1)
+            )
+            primary_img = img_result.scalar_one_or_none()
+            image_url = None
+            if primary_img:
+                image_url = (
+                    getattr(primary_img, "url_medium_webp", None)
+                    or getattr(primary_img, "url_medium", None)
+                    or getattr(primary_img, "url_thumbnail", None)
+                )
+
             items.append(
                 CartItemOut(
                     id=item.id,
                     variant_id=item.variant_id,
                     product_id=product.id,
                     product_name=product.name,
+                    product_slug=product.slug,
+                    product_image_url=image_url,
                     sku=variant.sku,
                     color=variant.color,
                     size=variant.size,
                     quantity=item.quantity,
+                    retail_price=variant.retail_price,
                     unit_price=effective_price,
                     line_total=line_total,
                     moq=product.moq,

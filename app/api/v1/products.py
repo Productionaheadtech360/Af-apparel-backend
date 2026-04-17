@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.schemas.product import CategoryOut, FilterParams, ProductDetail, ProductListItem
+from app.schemas.review import ProductReviewCreate
 from app.services.product_service import ProductService
 from app.types.api import PaginatedResponse
 
@@ -245,6 +246,80 @@ async def email_product_flyer(
         """,
     )
     return {"message": f"Flyer for '{product.name}' sent to {user.email}"}
+
+
+# ── Product Reviews ────────────────────────────────────────────────────────────
+
+@router.get("/{product_id}/reviews")
+async def list_product_reviews(
+    product_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.product import ProductReview
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(ProductReview)
+        .where(ProductReview.product_id == product_id, ProductReview.is_approved == True)  # noqa: E712
+        .order_by(ProductReview.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    reviews = result.scalars().all()
+
+    count_result = await db.execute(
+        select(func.count(ProductReview.id))
+        .where(ProductReview.product_id == product_id, ProductReview.is_approved == True)  # noqa: E712
+    )
+    total = count_result.scalar_one()
+
+    avg_result = await db.execute(
+        select(func.avg(ProductReview.rating))
+        .where(ProductReview.product_id == product_id, ProductReview.is_approved == True)  # noqa: E712
+    )
+    avg_rating = float(avg_result.scalar_one() or 0)
+
+    from app.schemas.review import ProductReviewOut, ReviewsResponse
+    return ReviewsResponse(
+        reviews=[ProductReviewOut.model_validate(r) for r in reviews],
+        total=total,
+        avg_rating=round(avg_rating, 1),
+    )
+
+
+@router.post("/{product_id}/reviews", status_code=201)
+async def create_product_review(
+    product_id: uuid.UUID,
+    payload: ProductReviewCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.product import Product, ProductReview
+    from app.schemas.review import ProductReviewOut
+
+    product_result = await db.execute(select(Product).where(Product.id == product_id))
+    if not product_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    user_id = getattr(request.state, "user_id", None)
+
+    review = ProductReview(
+        product_id=product_id,
+        user_id=uuid.UUID(user_id) if user_id else None,
+        rating=payload.rating,
+        title=payload.title,
+        body=payload.body,
+        reviewer_name=payload.reviewer_name,
+        reviewer_company=payload.reviewer_company,
+        is_verified=user_id is not None,
+        is_approved=True,
+    )
+    db.add(review)
+    await db.commit()
+    await db.refresh(review)
+    return ProductReviewOut.model_validate(review)
 
 
 # ── T202: Bulk asset download ─────────────────────────────────────────────────

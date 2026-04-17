@@ -136,7 +136,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     def _is_public(self, path: str) -> bool:
         if path in PUBLIC_PATHS:
             return True
-        # Allow GET /api/v1/products/* for guests
-        if path.startswith("/api/v1/products") and True:  # method checked in route
+        # Allow GET /api/v1/products/* and /api/v1/reviews/* for guests
+        if path.startswith("/api/v1/products"):
+            return True
+        if path.startswith("/api/v1/reviews"):
             return True
         return False

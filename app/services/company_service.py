@@ -113,7 +113,7 @@ class CompanyService:
             })
         return companies, total
 
-    async def get_company_detail(self, company_id: UUID) -> Company:
+    async def _get_company_orm(self, company_id: UUID) -> Company:
         result = await self.db.execute(
             select(Company).where(Company.id == company_id)
         )
@@ -122,8 +122,26 @@ class CompanyService:
             raise NotFoundError(f"Company {company_id} not found")
         return company
 
+    async def get_company_detail(self, company_id: UUID) -> dict:
+        from app.models.pricing import PricingTier
+        company = await self._get_company_orm(company_id)
+
+        discount_percent = None
+        if company.pricing_tier_id:
+            tier_result = await self.db.execute(
+                select(PricingTier).where(PricingTier.id == company.pricing_tier_id)
+            )
+            tier = tier_result.scalar_one_or_none()
+            if tier:
+                discount_percent = float(getattr(tier, "discount_percent", 0) or 0)
+
+        from app.schemas.company import CompanyDetail
+        data = CompanyDetail.model_validate(company).model_dump()
+        data["discount_percent"] = discount_percent
+        return data
+
     async def update_company_tiers(self, company_id: UUID, data: CompanyUpdate) -> Company:
-        company = await self.get_company_detail(company_id)
+        company = await self._get_company_orm(company_id)
         update_fields = data.model_dump(exclude_unset=True)
         for field, value in update_fields.items():
             setattr(company, field, value)
@@ -132,14 +150,13 @@ class CompanyService:
         return company
 
     async def suspend(self, company_id: UUID, reason: str) -> Company:
-        company = await self.get_company_detail(company_id)
+        company = await self._get_company_orm(company_id)
         company.status = "suspended"
-        # Could log reason to audit log or system notes here
         await self.db.flush()
         return company
 
     async def reactivate(self, company_id: UUID) -> Company:
-        company = await self.get_company_detail(company_id)
+        company = await self._get_company_orm(company_id)
         company.status = "active"
         await self.db.flush()
         return company

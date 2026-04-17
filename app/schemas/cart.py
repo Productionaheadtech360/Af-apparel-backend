@@ -23,10 +23,13 @@ class CartItemOut(BaseModel):
     variant_id: UUID
     product_id: UUID
     product_name: str
+    product_slug: str = ""
+    product_image_url: str | None = None
     sku: str
     color: str | None
     size: str | None
     quantity: int
+    retail_price: Decimal = Decimal("0")
     unit_price: Decimal
     line_total: Decimal
     moq: int
