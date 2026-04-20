@@ -139,9 +139,15 @@ class OrderService:
             if shipping_tier:
                 from app.services.shipping_service import ShippingService
                 shipping_svc = ShippingService(self.db)
+                # Only apply override when it is a positive non-zero amount
+                override = company.shipping_override_amount
+                if override is not None:
+                    override = Decimal(str(override))
+                    if override <= Decimal("0"):
+                        override = None
                 shipping_cost = shipping_svc.calculate_shipping_cost(
                     total_units, shipping_tier,
-                    company.shipping_override_amount,
+                    override,
                     order_subtotal=subtotal,
                 )
             if shipping_method == "expedited":

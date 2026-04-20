@@ -46,6 +46,7 @@ class CartValidation(BaseModel):
     mov_required: Decimal
     mov_current: Decimal
     estimated_shipping: Decimal
+    has_shipping_tier: bool = False  # False = no tier assigned; True = tier calculated (even if $0)
 
 
 class CartResponse(BaseModel):

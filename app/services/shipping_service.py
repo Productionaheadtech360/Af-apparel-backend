@@ -111,7 +111,7 @@ class ShippingService:
         """Return shipping cost based on tier calculation type.
         company_override takes priority if set."""
         if company_override is not None:
-            return company_override
+            return Decimal(str(company_override))
 
         if tier.calculation_type == "free":
             return Decimal("0.00")

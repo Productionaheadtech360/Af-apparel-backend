@@ -1,9 +1,12 @@
 """CartService — manages CartItem records and validates MOQ/MOV requirements."""
+import logging
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationError
@@ -378,6 +381,7 @@ class CartService:
 
         # Shipping estimate
         estimated_shipping = Decimal("0")
+        has_shipping_tier = False
         if items:
             try:
                 from app.models.company import Company
@@ -385,6 +389,7 @@ class CartService:
                 from app.services.shipping_service import ShippingService
                 from sqlalchemy.orm import selectinload
 
+                # Load company with shipping_tier + its brackets in one round-trip
                 company_result = await self.db.execute(
                     select(Company)
                     .options(
@@ -393,16 +398,36 @@ class CartService:
                     .where(Company.id == company_id)
                 )
                 company = company_result.scalar_one_or_none()
-                if company and company.shipping_tier:
+
+                if company and company.shipping_tier_id and not company.shipping_tier:
+                    # selectinload didn't populate the relationship (edge-case) — fall back
+                    tier_result = await self.db.execute(
+                        select(ShippingTier)
+                        .options(selectinload(ShippingTier.brackets))
+                        .where(ShippingTier.id == company.shipping_tier_id)
+                    )
+                    shipping_tier = tier_result.scalar_one_or_none()
+                else:
+                    shipping_tier = company.shipping_tier if company else None
+
+                if shipping_tier:
+                    has_shipping_tier = True
+                    # Only use override when it is a real positive amount (0 = "no override")
+                    override = company.shipping_override_amount if company else None
+                    if override is not None:
+                        override = Decimal(str(override))
+                        if override <= Decimal("0"):
+                            override = None
+
                     svc = ShippingService(self.db)
                     estimated_shipping = svc.calculate_shipping_cost(
                         total_units,
-                        company.shipping_tier,
-                        company.shipping_override_amount,
+                        shipping_tier,
+                        override,
                         order_subtotal=subtotal,
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error("cart shipping estimate failed for company %s: %s", company_id, exc, exc_info=True)
 
         return CartValidation(
             is_valid=not moq_violations and not mov_violation,
@@ -411,4 +436,5 @@ class CartService:
             mov_required=mov_required,
             mov_current=subtotal,
             estimated_shipping=estimated_shipping,
+            has_shipping_tier=has_shipping_tier,
         )
