@@ -381,12 +381,15 @@ class CartService:
         if items:
             try:
                 from app.models.company import Company
+                from app.models.shipping import ShippingTier
                 from app.services.shipping_service import ShippingService
                 from sqlalchemy.orm import selectinload
 
                 company_result = await self.db.execute(
                     select(Company)
-                    .options(selectinload(Company.shipping_tier))
+                    .options(
+                        selectinload(Company.shipping_tier).selectinload(ShippingTier.brackets)
+                    )
                     .where(Company.id == company_id)
                 )
                 company = company_result.scalar_one_or_none()
@@ -396,6 +399,7 @@ class CartService:
                         total_units,
                         company.shipping_tier,
                         company.shipping_override_amount,
+                        order_subtotal=subtotal,
                     )
             except Exception:
                 pass

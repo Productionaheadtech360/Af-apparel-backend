@@ -108,7 +108,7 @@ async def create_shipping_tier(
     svc = ShippingService(db)
     tier = await svc.create_tier(payload)
     await db.commit()
-    return tier
+    return await svc.get_tier_by_id(tier.id)
 
 
 @router.patch("/{tier_id}", response_model=ShippingTierOut)
@@ -116,9 +116,9 @@ async def update_shipping_tier(
     tier_id: UUID, payload: ShippingTierUpdate, db: AsyncSession = Depends(get_db)
 ):
     svc = ShippingService(db)
-    tier = await svc.update_tier(tier_id, payload)
+    await svc.update_tier(tier_id, payload)
     await db.commit()
-    return tier
+    return await svc.get_tier_by_id(tier_id)
 
 
 @router.delete("/{tier_id}", status_code=status.HTTP_204_NO_CONTENT)
