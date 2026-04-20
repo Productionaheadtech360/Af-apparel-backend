@@ -123,8 +123,12 @@ class OrderService:
             )
 
         # 5. Calculate shipping
+        shipping_method = confirm.shipping_method or "standard"
         shipping_cost = Decimal("0")
-        if company.shipping_tier_id:
+
+        if shipping_method == "will_call":
+            shipping_cost = Decimal("0.00")
+        elif company.shipping_tier_id:
             from sqlalchemy.orm import selectinload
             shipping_tier_result = await self.db.execute(
                 select(ShippingTier)
@@ -140,6 +144,8 @@ class OrderService:
                     company.shipping_override_amount,
                     order_subtotal=subtotal,
                 )
+            if shipping_method == "expedited":
+                shipping_cost += Decimal("45.00")
 
         total = subtotal + shipping_cost
 

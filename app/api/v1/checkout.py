@@ -185,8 +185,12 @@ async def confirm_checkout(
         if not cart.validation.is_valid:
             raise ValidationError("Cart validation failed — check MOQ and MOV requirements")
 
-        base_shipping = cart.validation.estimated_shipping
-        expedited_surcharge = Decimal("45.00") if payload.shipping_method == "expedited" else Decimal("0")
+        if payload.shipping_method == "will_call":
+            base_shipping = Decimal("0.00")
+            expedited_surcharge = Decimal("0.00")
+        else:
+            base_shipping = cart.validation.estimated_shipping
+            expedited_surcharge = Decimal("45.00") if payload.shipping_method == "expedited" else Decimal("0")
         total_float = float(cart.subtotal + base_shipping + expedited_surcharge)
 
         qb_pay = QBPaymentsService()
