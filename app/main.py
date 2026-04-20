@@ -377,6 +377,7 @@ from app.api.v1.admin import (  # noqa: E402
     quickbooks as admin_quickbooks,
     products as admin_products,
     inventory as admin_inventory,
+    reviews as admin_reviews,
 )
 
 _cors_origins = list({settings.FRONTEND_URL, *settings.allowed_origins_list} - {""})
@@ -410,6 +411,7 @@ app.include_router(admin_reports.router, prefix=_V1)
 app.include_router(admin_quickbooks.router, prefix=_V1)
 app.include_router(admin_products.router, prefix=_V1)
 app.include_router(admin_inventory.router, prefix=_V1)
+app.include_router(admin_reviews.router, prefix=_V1)
 
 # Static files
 os.makedirs("/app/media", exist_ok=True)

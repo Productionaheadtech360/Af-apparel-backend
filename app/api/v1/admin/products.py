@@ -520,6 +520,27 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
+@router.patch("/{product_id}/images/{image_id}")
+async def update_product_image(
+    product_id: UUID, image_id: UUID, payload: dict = Body(...), db: AsyncSession = Depends(get_db)
+):
+    """Update image metadata — alt_text (color tag) and/or is_primary."""
+    result = await db.execute(
+        select(ProductImage).where(
+            ProductImage.id == image_id, ProductImage.product_id == product_id
+        )
+    )
+    image = result.scalar_one_or_none()
+    if not image:
+        raise NotFoundError("Image not found")
+    if "alt_text" in payload:
+        image.alt_text = payload["alt_text"]
+    if "is_primary" in payload:
+        image.is_primary = bool(payload["is_primary"])
+    await db.commit()
+    return {"id": str(image.id), "alt_text": image.alt_text, "is_primary": image.is_primary}
+
+
 @router.delete("/{product_id}/images/{image_id}", status_code=204)
 async def delete_product_image(
     product_id: UUID, image_id: UUID, db: AsyncSession = Depends(get_db)
