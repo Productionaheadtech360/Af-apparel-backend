@@ -136,7 +136,9 @@ class OrderService:
                 from app.services.shipping_service import ShippingService
                 shipping_svc = ShippingService(self.db)
                 shipping_cost = shipping_svc.calculate_shipping_cost(
-                    total_units, shipping_tier, company.shipping_override_amount
+                    total_units, shipping_tier,
+                    company.shipping_override_amount,
+                    order_subtotal=subtotal,
                 )
 
         total = subtotal + shipping_cost
