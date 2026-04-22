@@ -1609,3 +1609,114 @@ async def delete_abandoned_cart(
         )
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Price List Report — inline product prices with tier discount applied
+# ---------------------------------------------------------------------------
+
+@router.get("/price-list-report")
+async def get_price_list_report(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns active products with variant prices (tier discount applied)."""
+    company_id = getattr(request.state, "company_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+
+    from decimal import Decimal
+    from app.models.product import Product, ProductVariant
+    from app.services.pricing_service import PricingService
+
+    discount = Decimal(str(getattr(request.state, "tier_discount_percent", "0")))
+    pricing_svc = PricingService(db)
+
+    products_result = await db.execute(
+        select(Product)
+        .where(Product.status == "active")
+        .order_by(Product.name)
+    )
+    products = products_result.scalars().all()
+
+    items = []
+    for product in products:
+        variants_result = await db.execute(
+            select(ProductVariant)
+            .where(ProductVariant.product_id == product.id)
+            .where(ProductVariant.status == "active")
+            .order_by(ProductVariant.color, ProductVariant.sort_order, ProductVariant.size)
+        )
+        variants = variants_result.scalars().all()
+        for v in variants:
+            unit_price = pricing_svc.calculate_effective_price(v.retail_price, discount)
+            items.append({
+                "product_id": str(product.id),
+                "product_name": product.name,
+                "sku": v.sku,
+                "color": v.color or "—",
+                "size": v.size or "—",
+                "retail_price": float(v.retail_price),
+                "unit_price": float(unit_price),
+            })
+
+    return {"items": items, "discount_percent": float(discount)}
+
+
+# ---------------------------------------------------------------------------
+# Sales History Report
+# ---------------------------------------------------------------------------
+
+@router.get("/sales-history")
+async def get_sales_history(
+    request: Request,
+    year: int = None,
+    display: str = "product",
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns order sales grouped by product or showing price details for a given year."""
+    company_id = getattr(request.state, "company_id", None)
+    if not company_id:
+        raise ForbiddenError("Company account required")
+
+    from app.models.order import Order, OrderItem
+    from sqlalchemy import extract
+
+    q = (
+        select(OrderItem, Order.created_at, Order.order_number)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(Order.company_id == company_id)
+        .where(Order.status.notin_(["cancelled", "refunded"]))
+    )
+    if year:
+        q = q.where(extract("year", Order.created_at) == year)
+
+    q = q.order_by(OrderItem.product_name, Order.created_at)
+    rows = (await db.execute(q)).all()
+
+    if display == "price":
+        result_items = [
+            {
+                "order_number": r[2],
+                "product_name": r[0].product_name,
+                "sku": r[0].sku,
+                "color": r[0].color or "—",
+                "size": r[0].size or "—",
+                "quantity": r[0].quantity,
+                "unit_price": float(r[0].unit_price),
+                "line_total": float(r[0].line_total),
+                "ordered_at": r[1].isoformat() if r[1] else None,
+            }
+            for r in rows
+        ]
+    else:
+        from collections import defaultdict
+        grouped: dict = defaultdict(lambda: {"product_name": "", "units_sold": 0, "total_revenue": 0.0})
+        for r in rows:
+            key = r[0].product_name
+            grouped[key]["product_name"] = r[0].product_name
+            grouped[key]["units_sold"] += r[0].quantity
+            grouped[key]["total_revenue"] += float(r[0].line_total)
+        result_items = list(grouped.values())
+
+    return {"items": result_items, "year": year, "display": display}
