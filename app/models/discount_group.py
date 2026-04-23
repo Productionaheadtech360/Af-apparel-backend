@@ -11,10 +11,12 @@ class DiscountGroup(BaseModel):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     customer_tag: Mapped[str | None] = mapped_column(String(100))
     applies_to: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'store'")
+    applies_to_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
     min_req_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'none'")
     min_req_value: Mapped[float | None] = mapped_column(Numeric(12, 2))
     shipping_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'store_default'")
     shipping_amount: Mapped[float | None] = mapped_column(Numeric(10, 2), server_default="0")
+    shipping_brackets_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'enabled'")
 
 
