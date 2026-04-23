@@ -8,6 +8,8 @@ from app.schemas.order import CheckoutConfirmRequest, CreatePaymentIntentRequest
 from app.services.cart_service import CartService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService
+from app.api.v1.discounts import validate_discount_code, compute_discount_amount
+from app.models.discount import DiscountUsage
 
 router = APIRouter(prefix="/checkout", tags=["checkout"])
 
@@ -173,6 +175,8 @@ async def confirm_checkout(
     # ── QB Payments flow ──────────────────────────────────────────────────────
     qb_charge_id: str | None = None
     qb_payment_status: str | None = None
+    coupon_discount_dc = None
+    coupon_discount_amount = Decimal("0")
 
     if has_qb:
         from app.services.cart_service import CartService as _CartService
@@ -191,7 +195,23 @@ async def confirm_checkout(
         else:
             base_shipping = cart.validation.estimated_shipping
             expedited_surcharge = Decimal("45.00") if payload.shipping_method == "expedited" else Decimal("0")
-        total_float = float(cart.subtotal + base_shipping + expedited_surcharge)
+
+        # Validate and apply discount code if provided
+        if payload.discount_code:
+            coupon_discount_dc, coupon_error = await validate_discount_code(
+                payload.discount_code,
+                float(cart.subtotal),
+                user_id,
+                "wholesale",
+                db,
+            )
+            if coupon_error:
+                raise ValidationError(f"Discount code invalid: {coupon_error}")
+            coupon_discount_amount = Decimal(str(
+                compute_discount_amount(coupon_discount_dc, float(cart.subtotal))
+            ))
+
+        total_float = float(cart.subtotal + base_shipping + expedited_surcharge - coupon_discount_amount)
 
         qb_pay = QBPaymentsService()
         try:
@@ -235,6 +255,18 @@ async def confirm_checkout(
         discount_percent=discount_percent,
         qb_charge_id=qb_charge_id,
         qb_payment_status=qb_payment_status,
+        coupon_discount_amount=coupon_discount_amount,
     )
+
+    # Record coupon usage after order is created
+    if coupon_discount_dc is not None and coupon_discount_amount > 0:
+        usage = DiscountUsage(
+            discount_code_id=coupon_discount_dc.id,
+            order_id=order.id,
+            user_id=user_id,
+            discount_amount_applied=coupon_discount_amount,
+        )
+        db.add(usage)
+
     await db.commit()
     return order

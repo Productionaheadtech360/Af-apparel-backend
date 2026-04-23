@@ -60,6 +60,7 @@ class CheckoutConfirmRequest(BaseModel):
     shipping_method: str | None = None   # "standard" | "expedited" | "freight"
     po_number: str | None = None
     order_notes: str | None = None
+    discount_code: str | None = None
 
 
 # ---------------------------------------------------------------------------

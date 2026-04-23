@@ -39,6 +39,7 @@ class OrderService:
         discount_percent: Decimal = Decimal("0"),
         qb_charge_id: str | None = None,
         qb_payment_status: str | None = None,
+        coupon_discount_amount: Decimal = Decimal("0"),
     ) -> Order:
         settings = get_settings()
 
@@ -153,7 +154,7 @@ class OrderService:
             if shipping_method == "expedited":
                 shipping_cost += Decimal("45.00")
 
-        total = subtotal + shipping_cost
+        total = subtotal + shipping_cost - coupon_discount_amount
 
         # 6. Resolve shipping address
         shipping_address = await self._resolve_address(confirm, company_id)
