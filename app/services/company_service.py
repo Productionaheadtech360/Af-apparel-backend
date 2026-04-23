@@ -110,6 +110,7 @@ class CompanyService:
                 "phone": owner.get("phone"),
                 "contact_name": owner.get("contact_name"),
                 "last_order_date": last_order_map.get(company.id),
+                "tags": company.tags or [],
             })
         return companies, total
 

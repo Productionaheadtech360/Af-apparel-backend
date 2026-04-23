@@ -18,8 +18,18 @@ class CompanyListItem(BaseModel):
     phone: str | None = None
     contact_name: str | None = None
     last_order_date: datetime | None = None
+    tags: list[str] = []
 
     model_config = {"from_attributes": True}
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_tags(cls, v: object) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(t) for t in v]
+        return []
 
 
 class CompanyDetail(BaseModel):
