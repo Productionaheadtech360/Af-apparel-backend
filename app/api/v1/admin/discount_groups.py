@@ -15,8 +15,11 @@ router = APIRouter(prefix="/admin", tags=["admin", "discount-groups"])
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class ShippingBracket(BaseModel):
-    min_order: float = 0
-    rate: float = 0
+    min_units: int = 0
+    max_units: int | None = None
+    min_order_value: float | None = None
+    max_order_value: float | None = None
+    cost: float = 0
 
 
 class DiscountGroupIn(BaseModel):
@@ -28,6 +31,8 @@ class DiscountGroupIn(BaseModel):
     min_req_value: float | None = None
     shipping_type: str = "store_default"
     shipping_amount: float = 0
+    shipping_calc_type: str = "order_value"
+    shipping_cutoff_time: str | None = None
     shipping_brackets: list[ShippingBracket] = []
     status: str = "enabled"
 
@@ -57,6 +62,8 @@ def _group_out(g: DiscountGroup) -> dict:
         "min_req_value": float(g.min_req_value) if g.min_req_value is not None else 0,
         "shipping_type": g.shipping_type,
         "shipping_amount": float(g.shipping_amount) if g.shipping_amount is not None else 0,
+        "shipping_calc_type": g.shipping_calc_type or "order_value",
+        "shipping_cutoff_time": g.shipping_cutoff_time or "",
         "shipping_brackets": shipping_brackets,
         "status": g.status,
         "created_at": g.created_at.isoformat() if g.created_at else None,
@@ -83,6 +90,8 @@ async def create_discount_group(body: DiscountGroupIn, db: AsyncSession = Depend
         min_req_value=body.min_req_value,
         shipping_type=body.shipping_type,
         shipping_amount=body.shipping_amount,
+        shipping_calc_type=body.shipping_calc_type,
+        shipping_cutoff_time=body.shipping_cutoff_time,
         shipping_brackets_json=json.dumps([b.model_dump() for b in body.shipping_brackets]) if body.shipping_brackets else None,
         status=body.status,
     )

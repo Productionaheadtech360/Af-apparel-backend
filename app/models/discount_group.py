@@ -16,6 +16,8 @@ class DiscountGroup(BaseModel):
     min_req_value: Mapped[float | None] = mapped_column(Numeric(12, 2))
     shipping_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'store_default'")
     shipping_amount: Mapped[float | None] = mapped_column(Numeric(10, 2), server_default="0")
+    shipping_calc_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    shipping_cutoff_time: Mapped[str | None] = mapped_column(String(50), nullable=True)
     shipping_brackets_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'enabled'")
 
