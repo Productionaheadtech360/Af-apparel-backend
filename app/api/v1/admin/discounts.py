@@ -106,7 +106,7 @@ async def create_discount(
     return _code_out(dc, 0)
 
 
-@router.put("/{discount_id}")
+@router.patch("/{discount_id}")
 async def update_discount(
     discount_id: UUID,
     payload: DiscountCodeUpdate,
