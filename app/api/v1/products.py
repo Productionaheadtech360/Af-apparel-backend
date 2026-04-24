@@ -42,6 +42,7 @@ async def list_products(
     db: AsyncSession = Depends(get_db),
 ):
     discount_percent = getattr(request.state, "tier_discount_percent", Decimal("0"))
+    discount_group_id = getattr(request.state, "discount_group_id", None)
     params = FilterParams(
         category=category,
         size=size,
@@ -57,8 +58,9 @@ async def list_products(
         in_stock=in_stock,
         product_code=product_code,
     )
+    is_guest = getattr(request.state, "company_id", None) is None
     svc = ProductService(db)
-    items, total = await svc.list_with_filters_and_search(params, discount_percent)
+    items, total = await svc.list_with_filters_and_search(params, discount_percent, discount_group_id, is_guest)
     return PaginatedResponse(
         items=items,
         total=total,
@@ -75,8 +77,10 @@ async def get_product(
     db: AsyncSession = Depends(get_db),
 ):
     discount_percent = getattr(request.state, "tier_discount_percent", Decimal("0"))
+    discount_group_id = getattr(request.state, "discount_group_id", None)
+    is_guest = getattr(request.state, "company_id", None) is None
     svc = ProductService(db)
-    return await svc.get_by_slug_with_variants(slug, discount_percent)
+    return await svc.get_by_slug_with_variants(slug, discount_percent, discount_group_id, is_guest)
 
 
 # ── T201: Asset download endpoints ────────────────────────────────────────────

@@ -385,6 +385,7 @@ class CartService:
         if items:
             try:
                 from app.models.company import Company
+                from app.models.discount_group import DiscountGroup
                 from app.models.shipping import ShippingTier
                 from app.services.shipping_service import ShippingService
                 from sqlalchemy.orm import selectinload
@@ -399,33 +400,60 @@ class CartService:
                 )
                 company = company_result.scalar_one_or_none()
 
-                if company and company.shipping_tier_id and not company.shipping_tier:
-                    # selectinload didn't populate the relationship (edge-case) — fall back
-                    tier_result = await self.db.execute(
-                        select(ShippingTier)
-                        .options(selectinload(ShippingTier.brackets))
-                        .where(ShippingTier.id == company.shipping_tier_id)
+                # Override helper: sanitize company override amount
+                def _override(c: Company | None) -> Decimal | None:
+                    val = c.shipping_override_amount if c else None
+                    if val is None:
+                        return None
+                    d = Decimal(str(val))
+                    return d if d > Decimal("0") else None
+
+                svc = ShippingService(self.db)
+
+                # DiscountGroup shipping takes priority over ShippingTier
+                discount_group = None
+                if company and company.tags:
+                    dg_result = await self.db.execute(
+                        select(DiscountGroup)
+                        .where(
+                            DiscountGroup.customer_tag.in_(company.tags),
+                            DiscountGroup.status == "enabled",
+                        )
+                        .limit(1)
                     )
-                    shipping_tier = tier_result.scalar_one_or_none()
-                else:
-                    shipping_tier = company.shipping_tier if company else None
+                    discount_group = dg_result.scalar_one_or_none()
 
-                if shipping_tier:
+                if discount_group and discount_group.shipping_type != "store_default":
                     has_shipping_tier = True
-                    # Only use override when it is a real positive amount (0 = "no override")
-                    override = company.shipping_override_amount if company else None
-                    if override is not None:
-                        override = Decimal(str(override))
-                        if override <= Decimal("0"):
-                            override = None
-
-                    svc = ShippingService(self.db)
-                    estimated_shipping = svc.calculate_shipping_cost(
+                    estimated_shipping = svc.calculate_dg_shipping_cost(
                         total_units,
-                        shipping_tier,
-                        override,
+                        discount_group.shipping_type,
+                        discount_group.shipping_amount,
+                        discount_group.shipping_calc_type,
+                        discount_group.shipping_brackets_json,
+                        _override(company),
                         order_subtotal=subtotal,
                     )
+                else:
+                    if company and company.shipping_tier_id and not company.shipping_tier:
+                        # selectinload didn't populate the relationship (edge-case) — fall back
+                        tier_result = await self.db.execute(
+                            select(ShippingTier)
+                            .options(selectinload(ShippingTier.brackets))
+                            .where(ShippingTier.id == company.shipping_tier_id)
+                        )
+                        shipping_tier = tier_result.scalar_one_or_none()
+                    else:
+                        shipping_tier = company.shipping_tier if company else None
+
+                    if shipping_tier:
+                        has_shipping_tier = True
+                        estimated_shipping = svc.calculate_shipping_cost(
+                            total_units,
+                            shipping_tier,
+                            _override(company),
+                            order_subtotal=subtotal,
+                        )
             except Exception as exc:
                 logger.error("cart shipping estimate failed for company %s: %s", company_id, exc, exc_info=True)
 

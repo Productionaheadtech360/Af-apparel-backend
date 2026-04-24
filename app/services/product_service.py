@@ -52,11 +52,13 @@ class ProductService:
         self,
         params: FilterParams,
         discount_percent: Decimal = Decimal("0"),
+        discount_group_id: str | None = None,
+        is_guest: bool = False,
     ) -> tuple[list[Product], int]:
         cache_key = (
             f"products:list:{params.category}:{params.size}:{params.color}:"
             f"{params.price_min}:{params.price_max}:{params.q}:{params.page}:"
-            f"{params.page_size}:{discount_percent}"
+            f"{params.page_size}:{discount_percent}:{discount_group_id or 'none'}:{'g' if is_guest else 'a'}"
             f"{params.gender}:{params.fabric}:{params.weight}:{params.in_stock}:"
             f"{params.product_code}"
         )
@@ -144,7 +146,7 @@ class ProductService:
         products = result.scalars().unique().all()
 
         # Apply pricing
-        products = await self._attach_pricing_and_stock(list(products), discount_percent)
+        products = await self._attach_pricing_and_stock(list(products), discount_percent, discount_group_id, is_guest)
 
         await redis_set(
             cache_key,
@@ -158,9 +160,11 @@ class ProductService:
     # ------------------------------------------------------------------
 
     async def get_by_slug_with_variants(
-        self, slug: str, discount_percent: Decimal = Decimal("0")
+        self, slug: str, discount_percent: Decimal = Decimal("0"),
+        discount_group_id: str | None = None,
+        is_guest: bool = False,
     ) -> Product:
-        cache_key = f"products:detail:{slug}:{discount_percent}"
+        cache_key = f"products:detail:{slug}:{discount_percent}:{discount_group_id or 'none'}:{'g' if is_guest else 'a'}"
         cached = await redis_get(cache_key)
         if cached:
             return json.loads(cached)
@@ -180,7 +184,7 @@ class ProductService:
         if not product:
             raise NotFoundError(f"Product '{slug}' not found")
 
-        products = await self._attach_pricing_and_stock([product], discount_percent)
+        products = await self._attach_pricing_and_stock([product], discount_percent, discount_group_id, is_guest)
         product = products[0]
 
         await redis_set(cache_key, json.dumps(_product_to_dict(product)), expire=_DETAIL_TTL)
@@ -208,8 +212,11 @@ class ProductService:
     #     return products
 
     async def _attach_pricing_and_stock(
-        self, products: list[Product], discount_percent: Decimal
+        self, products: list[Product], discount_percent: Decimal,
+        discount_group_id: str | None = None,
+        is_guest: bool = False,
     ) -> list[Product]:
+        from decimal import ROUND_HALF_UP
         from app.services.pricing_service import PricingService
         from app.models.inventory import InventoryRecord
 
@@ -227,11 +234,52 @@ class ProductService:
             for variant_id, total_qty in stock_result.all():
                 stock_map[variant_id] = int(total_qty or 0)
 
-        for product in products:
-            for variant in product.variants:
-                variant.effective_price = pricing_svc.calculate_effective_price(
-                    variant.retail_price, discount_percent
+        # Batch-load VariantPricingOverride for this discount group (keyed by product_id string)
+        override_map: dict = {}
+        if discount_group_id:
+            from app.models.discount_group import VariantPricingOverride
+            from sqlalchemy import and_
+            product_ids = [str(p.id) for p in products]
+            ov_result = await self.db.execute(
+                select(VariantPricingOverride).where(
+                    and_(
+                        VariantPricingOverride.product_id.in_(product_ids),
+                        VariantPricingOverride.tier_id == discount_group_id,
+                    )
                 )
+            )
+            for row in ov_result.scalars().all():
+                override_map[row.product_id] = row
+
+        for product in products:
+            ov = override_map.get(str(product.id))
+            for variant in product.variants:
+                if is_guest:
+                    # Guests see MSRP; fall back to retail_price if msrp not set
+                    msrp = getattr(variant, "msrp", None)
+                    variant.effective_price = (
+                        Decimal(str(msrp)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        if msrp is not None
+                        else Decimal(str(variant.retail_price))
+                    )
+                elif ov is not None and ov.price is not None:
+                    # Absolute price override
+                    variant.effective_price = Decimal(str(ov.price)).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                elif ov is not None and ov.discount_percent is not None:
+                    # Per-group discount % applied to each variant's retail price
+                    multiplier = Decimal("1") - (
+                        Decimal(str(ov.discount_percent)) / Decimal("100")
+                    )
+                    variant.effective_price = (variant.retail_price * multiplier).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                else:
+                    # Fall back to flat tier discount
+                    variant.effective_price = pricing_svc.calculate_effective_price(
+                        variant.retail_price, discount_percent
+                    )
                 # Use real inventory; 0 in stock_map means no records → treat as unlimited (9999)
                 qty = stock_map.get(variant.id)
                 variant.stock_quantity = qty if qty is not None else 9999
@@ -492,12 +540,15 @@ def _product_to_dict(product: Product) -> dict:
 
 
 def _variant_to_dict(variant: ProductVariant) -> dict:
+    msrp = getattr(variant, "msrp", None)
     return {
         "id": str(variant.id),
         "sku": variant.sku,
         "color": variant.color,
         "size": variant.size,
         "retail_price": str(variant.retail_price),
+        "compare_price": str(variant.compare_price) if variant.compare_price is not None else None,
+        "msrp": str(msrp) if msrp is not None else None,
         "effective_price": str(getattr(variant, "effective_price", variant.retail_price)),
         "stock_quantity": getattr(variant, "stock_quantity", 0),
         "status": variant.status,

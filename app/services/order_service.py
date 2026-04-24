@@ -129,28 +129,57 @@ class OrderService:
 
         if shipping_method == "will_call":
             shipping_cost = Decimal("0.00")
-        elif company.shipping_tier_id:
+        else:
+            from app.models.discount_group import DiscountGroup as _DiscountGroup
+            from app.services.shipping_service import ShippingService
             from sqlalchemy.orm import selectinload
-            shipping_tier_result = await self.db.execute(
-                select(ShippingTier)
-                .options(selectinload(ShippingTier.brackets))
-                .where(ShippingTier.id == company.shipping_tier_id)
-            )
-            shipping_tier = shipping_tier_result.scalar_one_or_none()
-            if shipping_tier:
-                from app.services.shipping_service import ShippingService
-                shipping_svc = ShippingService(self.db)
-                # Only apply override when it is a positive non-zero amount
-                override = company.shipping_override_amount
-                if override is not None:
-                    override = Decimal(str(override))
-                    if override <= Decimal("0"):
-                        override = None
-                shipping_cost = shipping_svc.calculate_shipping_cost(
-                    total_units, shipping_tier,
-                    override,
-                    order_subtotal=subtotal,
+
+            def _override_val(c: Company) -> Decimal | None:
+                val = c.shipping_override_amount
+                if val is None:
+                    return None
+                d = Decimal(str(val))
+                return d if d > Decimal("0") else None
+
+            shipping_svc = ShippingService(self.db)
+            _dg_applied = False
+
+            if company.tags:
+                dg_result = await self.db.execute(
+                    select(_DiscountGroup)
+                    .where(
+                        _DiscountGroup.customer_tag.in_(company.tags),
+                        _DiscountGroup.status == "enabled",
+                    )
+                    .limit(1)
                 )
+                dg = dg_result.scalar_one_or_none()
+                if dg and dg.shipping_type != "store_default":
+                    _dg_applied = True
+                    shipping_cost = shipping_svc.calculate_dg_shipping_cost(
+                        total_units,
+                        dg.shipping_type,
+                        dg.shipping_amount,
+                        dg.shipping_calc_type,
+                        dg.shipping_brackets_json,
+                        _override_val(company),
+                        order_subtotal=subtotal,
+                    )
+
+            if not _dg_applied and company.shipping_tier_id:
+                shipping_tier_result = await self.db.execute(
+                    select(ShippingTier)
+                    .options(selectinload(ShippingTier.brackets))
+                    .where(ShippingTier.id == company.shipping_tier_id)
+                )
+                shipping_tier = shipping_tier_result.scalar_one_or_none()
+                if shipping_tier:
+                    shipping_cost = shipping_svc.calculate_shipping_cost(
+                        total_units, shipping_tier,
+                        _override_val(company),
+                        order_subtotal=subtotal,
+                    )
+
             if shipping_method == "expedited":
                 shipping_cost += Decimal("45.00")
 

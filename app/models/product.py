@@ -118,6 +118,7 @@ class ProductVariant(BaseModel):
     size: Mapped[str | None] = mapped_column(String(50))
     retail_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     compare_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    msrp: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     # Status: active | discontinued | out_of_stock
     status: Mapped[str] = mapped_column(
         Enum("active", "discontinued", "out_of_stock", name="variant_status"),

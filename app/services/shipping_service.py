@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from uuid import UUID
 
@@ -139,6 +140,55 @@ class ShippingService:
         if brackets:
             return Decimal(str(brackets[0].cost))
         return Decimal("0.00")
+
+    def calculate_dg_shipping_cost(
+        self,
+        total_units: int,
+        shipping_type: str,
+        shipping_amount: float | None,
+        shipping_calc_type: str | None,
+        shipping_brackets_json: str | None,
+        company_override: Decimal | None = None,
+        order_subtotal: Decimal = Decimal("0"),
+    ) -> Decimal:
+        """Calculate shipping from a DiscountGroup's settings (bracket JSON, not ORM objects)."""
+        if company_override is not None and company_override > Decimal("0"):
+            return company_override
+
+        if shipping_type == "flat_rate":
+            return Decimal(str(shipping_amount or 0))
+
+        if not shipping_brackets_json:
+            return Decimal("0.00")
+
+        try:
+            brackets = json.loads(shipping_brackets_json)
+        except Exception:
+            return Decimal("0.00")
+
+        if not brackets:
+            return Decimal("0.00")
+
+        calc_type = shipping_calc_type or "units"
+
+        if calc_type == "order_value":
+            sorted_b = sorted(brackets, key=lambda b: float(b.get("min_order_value") or 0))
+            for bracket in reversed(sorted_b):
+                min_val = Decimal(str(bracket.get("min_order_value") or 0))
+                max_val = bracket.get("max_order_value")
+                if order_subtotal >= min_val:
+                    if max_val is None or order_subtotal <= Decimal(str(max_val)):
+                        return Decimal(str(bracket.get("cost", 0)))
+        else:
+            sorted_b = sorted(brackets, key=lambda b: int(b.get("min_units") or 0))
+            for bracket in reversed(sorted_b):
+                min_u = int(bracket.get("min_units") or 0)
+                max_u = bracket.get("max_units")
+                if total_units >= min_u:
+                    if max_u is None or total_units <= int(max_u):
+                        return Decimal(str(bracket.get("cost", 0)))
+
+        return Decimal(str(brackets[0].get("cost", 0))) if brackets else Decimal("0.00")
 
     def get_applicable_bracket(
         self, total_units: int, tier: ShippingTier, order_subtotal: Decimal = Decimal("0")

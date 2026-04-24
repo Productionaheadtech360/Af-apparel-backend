@@ -65,6 +65,7 @@ class VariantOut(BaseModel):
     size: str | None
     retail_price: Decimal
     compare_price: Decimal | None = None
+    msrp: Decimal | None = None
     effective_price: Decimal | None = None  # populated by pricing layer
     stock_quantity: int = 0               # summed across warehouses
     status: str
@@ -200,6 +201,7 @@ class VariantCreate(BaseModel):
     size: str | None = None
     retail_price: Decimal = Field(Decimal("0"), ge=0)
     compare_price: Decimal | None = None
+    msrp: Decimal | None = None
     status: str = "active"
 
 

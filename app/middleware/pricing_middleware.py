@@ -77,4 +77,37 @@ class PricingMiddleware:
                     pass  # Graceful fallback to 0%
 
         request.state.tier_discount_percent = discount_percent
+
+        # Resolve DiscountGroup ID for this company (drives variant pricing overrides)
+        discount_group_id: str | None = None
+        if company_id:
+            dg_cache_key = f"company:{company_id}:discount_group_id"
+            cached_dg = await redis_get(dg_cache_key)
+            if cached_dg is not None:
+                discount_group_id = cached_dg if cached_dg != "none" else None
+            else:
+                try:
+                    from app.models.company import Company
+                    from app.models.discount_group import DiscountGroup
+                    from sqlalchemy import select
+                    async with async_session_factory() as session:
+                        tags = await session.scalar(
+                            select(Company.tags).where(Company.id == company_id)
+                        )
+                        if tags:
+                            dg_id = await session.scalar(
+                                select(DiscountGroup.id)
+                                .where(
+                                    DiscountGroup.customer_tag.in_(tags),
+                                    DiscountGroup.status == "enabled",
+                                )
+                                .limit(1)
+                            )
+                            if dg_id:
+                                discount_group_id = str(dg_id)
+                    await redis_set(dg_cache_key, discount_group_id or "none", expire=_CACHE_TTL)
+                except Exception:
+                    pass
+
+        request.state.discount_group_id = discount_group_id
         await self.app(scope, receive, send)
