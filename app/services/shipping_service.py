@@ -155,9 +155,9 @@ class ShippingService:
         if company_override is not None and company_override > Decimal("0"):
             return company_override
 
-        if shipping_type == "flat_rate":
+        if shipping_type == "flat_rate" and not shipping_brackets_json:
             return Decimal(str(shipping_amount or 0))
-
+        
         if not shipping_brackets_json:
             return Decimal("0.00")
 
