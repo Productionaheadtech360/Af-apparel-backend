@@ -1,0 +1,324 @@
+"""Guest checkout endpoints — no authentication required."""
+import json
+import logging
+from decimal import Decimal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.exceptions import NotFoundError, ValidationError, InsufficientStockError
+from app.models.inventory import InventoryRecord
+from app.models.order import Order, OrderItem
+from app.models.product import Product, ProductVariant
+from app.schemas.order import AddressIn
+
+router = APIRouter(prefix="/guest", tags=["guest"])
+
+logger = logging.getLogger(__name__)
+
+GUEST_SHIPPING_STANDARD = Decimal("9.99")
+GUEST_SHIPPING_EXPEDITED = Decimal("54.99")  # standard + expedited surcharge
+
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+class GuestCartItem(BaseModel):
+    variant_id: UUID
+    quantity: int
+
+
+class GuestCheckoutRequest(BaseModel):
+    guest_name: str
+    guest_email: str
+    guest_phone: str | None = None
+    items: list[GuestCartItem]
+    shipping_address: AddressIn
+    shipping_method: str = "standard"  # standard | expedited | will_call
+    qb_token: str
+    order_notes: str | None = None
+
+
+class GuestOrderOut(BaseModel):
+    order_id: str
+    order_number: str
+    total: float
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/guest/checkout
+# ---------------------------------------------------------------------------
+
+@router.post("/checkout", status_code=201)
+async def guest_checkout(
+    payload: GuestCheckoutRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GuestOrderOut:
+    """Place an order as a guest (retail pricing, no account required)."""
+    from app.core.config import get_settings
+    from app.core.redis import redis_increment
+    from app.services.qb_payments_service import QBPaymentsService
+
+    settings = get_settings()
+
+    if not payload.items:
+        raise ValidationError("Cart is empty")
+
+    # 1. Validate + price each item using MSRP
+    order_items_data = []
+    subtotal = Decimal("0")
+
+    for cart_item in payload.items:
+        if cart_item.quantity < 1:
+            raise ValidationError("Quantity must be at least 1")
+
+        variant_result = await db.execute(
+            select(ProductVariant, Product)
+            .join(Product, ProductVariant.product_id == Product.id)
+            .where(ProductVariant.id == cart_item.variant_id)
+        )
+        row = variant_result.first()
+        if not row:
+            raise NotFoundError(f"Variant {cart_item.variant_id} not found")
+        variant, product = row
+
+        if variant.status != "active":
+            raise ValidationError(f"SKU {variant.sku} is no longer available")
+
+        # Stock check — 0 means unlimited
+        stock_result = await db.execute(
+            select(func.coalesce(func.sum(InventoryRecord.quantity), 0))
+            .where(InventoryRecord.variant_id == variant.id)
+        )
+        available = stock_result.scalar_one()
+        if available > 0 and available < cart_item.quantity:
+            raise InsufficientStockError(
+                f"Only {available} units available for {variant.sku}"
+            )
+
+        # Guest price = MSRP if set, else retail_price
+        unit_price = Decimal(str(variant.msrp or variant.retail_price or 0))
+        line_total = unit_price * cart_item.quantity
+        subtotal += line_total
+
+        order_items_data.append({
+            "variant_id": variant.id,
+            "product_name": product.name,
+            "sku": variant.sku,
+            "color": variant.color,
+            "size": variant.size,
+            "quantity": cart_item.quantity,
+            "unit_price": unit_price,
+            "line_total": line_total,
+        })
+
+    # 2. Shipping cost
+    method = payload.shipping_method or "standard"
+    if method == "will_call":
+        shipping_cost = Decimal("0")
+    elif method == "expedited":
+        shipping_cost = GUEST_SHIPPING_EXPEDITED
+    else:
+        shipping_cost = GUEST_SHIPPING_STANDARD
+
+    total = subtotal + shipping_cost
+
+    # 3. Charge card via QB Payments
+    qb_pay = QBPaymentsService()
+    try:
+        charge_resp = qb_pay.charge_card(
+            token=payload.qb_token,
+            amount=float(total),
+            description=f"AF Apparels guest order — {payload.guest_email}",
+        )
+    except RuntimeError as exc:
+        raise ValidationError(f"Payment failed: {exc}") from exc
+
+    qb_charge_id = charge_resp.get("id")
+    qb_payment_status = charge_resp.get("status", "UNKNOWN")
+    _payment_status = "paid" if qb_payment_status == "CAPTURED" else "pending"
+
+    # 4. Generate order number
+    _ORDER_COUNTER_KEY = "order:counter"
+    try:
+        counter = await redis_increment(_ORDER_COUNTER_KEY)
+    except Exception:
+        import random
+        counter = random.randint(10000, 99999)
+    order_number = f"AF-{counter:06d}"
+
+    # 5. Create Order record
+    address_snapshot = json.dumps({
+        "full_name": payload.guest_name,
+        "line1": payload.shipping_address.line1,
+        "line2": payload.shipping_address.line2,
+        "city": payload.shipping_address.city,
+        "state": payload.shipping_address.state,
+        "postal_code": payload.shipping_address.postal_code,
+        "country": payload.shipping_address.country,
+        "phone": payload.guest_phone,
+    })
+
+    order = Order(
+        order_number=order_number,
+        company_id=None,
+        placed_by_id=None,
+        is_guest_order=True,
+        guest_email=payload.guest_email.lower().strip(),
+        guest_name=payload.guest_name,
+        guest_phone=payload.guest_phone,
+        status="pending",
+        payment_status=_payment_status,
+        notes=payload.order_notes,
+        qb_payment_charge_id=qb_charge_id,
+        qb_payment_status=qb_payment_status,
+        subtotal=subtotal,
+        shipping_cost=shipping_cost,
+        tax_amount=Decimal("0"),
+        total=total,
+        shipping_address_snapshot=address_snapshot,
+    )
+    db.add(order)
+    await db.flush()
+
+    # 6. Create OrderItem records + deduct inventory
+    from sqlalchemy import update as _update
+
+    for item_data in order_items_data:
+        db.add(OrderItem(order_id=order.id, **item_data))
+
+        qty_to_deduct = int(item_data["quantity"])
+        inv_result = await db.execute(
+            select(InventoryRecord)
+            .where(InventoryRecord.variant_id == item_data["variant_id"])
+            .order_by(InventoryRecord.quantity.desc())
+        )
+        for record in inv_result.scalars().all():
+            if qty_to_deduct <= 0:
+                break
+            deduct = min(int(record.quantity), qty_to_deduct)
+            if deduct > 0:
+                await db.execute(
+                    _update(InventoryRecord)
+                    .where(InventoryRecord.id == record.id)
+                    .values(quantity=int(record.quantity) - deduct)
+                )
+                qty_to_deduct -= deduct
+
+    await db.flush()
+
+    # 7. Reload with items eager-loaded
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.id == order.id)
+    )
+    order = result.scalar_one()
+
+    # 8. Send guest confirmation email
+    try:
+        from app.services.email_service import EmailService
+        email_svc = EmailService(db)
+        email_svc.send_raw(
+            to_email=payload.guest_email,
+            subject=f"Order Confirmed — {order.order_number}",
+            body_html=f"""
+                <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                  <div style="background:#080808;padding:24px;text-align:center">
+                    <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
+                    <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
+                    <span style="color:#fff;font-size:14px;margin-left:8px">APPARELS</span>
+                  </div>
+                  <div style="padding:32px;background:#fff">
+                    <h2 style="color:#2A2830">Order Confirmed!</h2>
+                    <p>Hi {payload.guest_name},</p>
+                    <p>Your order <b>{order.order_number}</b> has been received and is being processed.</p>
+                    <p><b>Total Charged:</b> ${float(order.total):.2f}</p>
+                    <p><b>Items:</b></p>
+                    <ul>
+                      {"".join(f"<li>{i.product_name} — {i.color or ''} {i.size or ''} x{i.quantity} @ ${float(i.unit_price):.2f}</li>" for i in order.items)}
+                    </ul>
+                    <p style="margin-top:20px">Questions? Call (214) 272-7213 or reply to this email.</p>
+                    <p>— AF Apparels Team</p>
+                  </div>
+                </div>
+            """,
+        )
+    except Exception as exc:
+        logger.warning("Guest confirmation email failed: %s", exc)
+
+    # 9. Admin notification
+    try:
+        if settings.ADMIN_NOTIFICATION_EMAIL:
+            from app.services.email_service import EmailService as _ES
+            _ES(db).send_raw(
+                to_email=settings.ADMIN_NOTIFICATION_EMAIL,
+                subject=f"New Guest Order — {order.order_number} (${float(order.total):.2f})",
+                body_html=f"<h2>New Guest Order</h2><p><b>Order:</b> {order.order_number}</p><p><b>Guest:</b> {payload.guest_name} &lt;{payload.guest_email}&gt;</p><p><b>Total:</b> ${float(order.total):.2f}</p>",
+            )
+    except Exception as exc:
+        logger.warning("Admin guest order notification failed: %s", exc)
+
+    await db.commit()
+
+    return GuestOrderOut(
+        order_id=str(order.id),
+        order_number=order.order_number,
+        total=float(order.total),
+        status=order.status,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/guest/orders/{order_number}?email={email}
+# ---------------------------------------------------------------------------
+
+@router.get("/orders/{order_number}")
+async def track_guest_order(
+    order_number: str,
+    email: str = Query(..., description="Guest email used at checkout"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Look up a guest order by order number + email."""
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(
+            Order.order_number == order_number,
+            Order.is_guest_order == True,
+            Order.guest_email == email.lower().strip(),
+        )
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise NotFoundError("Order not found. Please check your order number and email.")
+
+    return {
+        "order_number": order.order_number,
+        "status": order.status,
+        "payment_status": order.payment_status,
+        "subtotal": float(order.subtotal),
+        "shipping_cost": float(order.shipping_cost),
+        "total": float(order.total),
+        "created_at": order.created_at.isoformat(),
+        "guest_name": order.guest_name,
+        "items": [
+            {
+                "product_name": i.product_name,
+                "sku": i.sku,
+                "color": i.color,
+                "size": i.size,
+                "quantity": i.quantity,
+                "unit_price": float(i.unit_price),
+                "line_total": float(i.line_total),
+            }
+            for i in order.items
+        ],
+    }

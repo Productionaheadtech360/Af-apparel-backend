@@ -159,4 +159,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return True
         if path.startswith("/api/v1/reviews"):
             return True
+        # Guest checkout and order tracking — no auth required
+        if path.startswith("/api/v1/guest"):
+            return True
         return False

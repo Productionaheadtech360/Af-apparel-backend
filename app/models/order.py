@@ -1,7 +1,7 @@
 """Order, OrderItem, CartItem, AbandonedCart, OrderTemplate models."""
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,13 +19,19 @@ class Order(BaseModel):
     __tablename__ = "orders"
 
     order_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    company_id: Mapped[uuid.UUID] = mapped_column(
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="RESTRICT"),
-        nullable=False, index=True
+        nullable=True, index=True
     )
-    placed_by_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    placed_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
+
+    # Guest order fields
+    guest_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    guest_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    guest_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_guest_order: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Status: pending | confirmed | processing | shipped | delivered | cancelled | refunded
     status: Mapped[str] = mapped_column(
@@ -91,8 +97,8 @@ class Order(BaseModel):
         return len(self.items) if self.items is not None else 0
 
     # ── Relationships ─────────────────────────────────────────────────────────
-    company: Mapped["Company"] = relationship("Company", back_populates="orders")
-    placed_by: Mapped["User"] = relationship("User")
+    company: Mapped[Optional["Company"]] = relationship("Company", back_populates="orders")
+    placed_by: Mapped[Optional["User"]] = relationship("User")
     items: Mapped[list["OrderItem"]] = relationship(
         "OrderItem", back_populates="order", cascade="all, delete-orphan"
     )

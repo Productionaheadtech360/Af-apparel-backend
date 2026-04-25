@@ -165,18 +165,23 @@ async def list_admin_orders(
     status: str | None = None,
     payment_status: str | None = None,
     company_id: str | None = None,
+    guest_only: bool = Query(False, description="Show only guest orders"),
     date_from: date | None = Query(None, description="Filter orders created on or after this date"),
     date_to: date | None = Query(None, description="Filter orders created on or before this date"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Order, Company.name.label("company_name")).join(
-        Company, Order.company_id == Company.id
+    from sqlalchemy import outerjoin
+    # LEFT JOIN so guest orders (company_id=NULL) are included
+    query = select(Order, Company.name.label("company_name")).select_from(
+        outerjoin(Order, Company, Order.company_id == Company.id)
     )
     if q:
         query = query.where(
-            (Order.order_number.ilike(f"%{q}%")) | (Order.po_number.ilike(f"%{q}%"))
+            (Order.order_number.ilike(f"%{q}%"))
+            | (Order.po_number.ilike(f"%{q}%"))
+            | (Order.guest_email.ilike(f"%{q}%"))
         )
     if status:
         query = query.where(Order.status == status)
@@ -184,6 +189,8 @@ async def list_admin_orders(
         query = query.where(Order.payment_status == payment_status)
     if company_id:
         query = query.where(Order.company_id == company_id)
+    if guest_only:
+        query = query.where(Order.is_guest_order == True)
     if date_from:
         query = query.where(Order.created_at >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
@@ -217,6 +224,9 @@ async def list_admin_orders(
             courier=order.courier,
             courier_service=order.courier_service,
             shipped_at=order.shipped_at,
+            is_guest_order=order.is_guest_order,
+            guest_email=order.guest_email,
+            guest_name=order.guest_name,
         ))
 
     return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, pages=(total + page_size - 1) // page_size)
@@ -228,7 +238,10 @@ async def export_orders_csv(
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Order, Company.name.label("company_name")).join(Company, Order.company_id == Company.id)
+    from sqlalchemy import outerjoin as _outerjoin
+    query = select(Order, Company.name.label("company_name")).select_from(
+        _outerjoin(Order, Company, Order.company_id == Company.id)
+    )
     if q:
         query = query.where(Order.order_number.ilike(f"%{q}%"))
     if status:
@@ -238,11 +251,12 @@ async def export_orders_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Order #", "Company", "Status", "Payment", "PO Number", "Total", "Created"])
+    writer.writerow(["Order #", "Company / Guest", "Status", "Payment", "PO Number", "Total", "Created"])
     for row in rows:
         order, company_name = row
+        display_name = company_name or (f"Guest: {order.guest_email}" if order.is_guest_order else "Unknown")
         writer.writerow([
-            order.order_number, company_name, order.status, order.payment_status,
+            order.order_number, display_name, order.status, order.payment_status,
             order.po_number or "", str(order.total), order.created_at.isoformat(),
         ])
     output.seek(0)
@@ -255,9 +269,10 @@ async def export_orders_csv(
 
 @router.get("/orders/{order_id}", response_model=AdminOrderDetail)
 async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import outerjoin
     result = await db.execute(
         select(Order, Company.name.label("company_name"))
-        .join(Company, Order.company_id == Company.id)
+        .select_from(outerjoin(Order, Company, Order.company_id == Company.id))
         .where(Order.id == order_id)
     )
     row = result.one_or_none()
@@ -268,19 +283,20 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
     items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
     items = items_result.scalars().all()
 
-    # Enrich with customer contact from placing user
-    customer_name: str | None = None
-    customer_email: str | None = None
-    customer_phone: str | None = None
-    try:
-        user_result = await db.execute(select(User).where(User.id == order.placed_by_id))
-        user = user_result.scalar_one_or_none()
-        if user:
-            customer_name = f"{user.first_name} {user.last_name}".strip() or None
-            customer_email = user.email
-            customer_phone = user.phone
-    except Exception:
-        pass
+    # Enrich with customer contact — from placing user or guest fields
+    customer_name: str | None = order.guest_name if order.is_guest_order else None
+    customer_email: str | None = order.guest_email if order.is_guest_order else None
+    customer_phone: str | None = order.guest_phone if order.is_guest_order else None
+    if not order.is_guest_order and order.placed_by_id:
+        try:
+            user_result = await db.execute(select(User).where(User.id == order.placed_by_id))
+            user = user_result.scalar_one_or_none()
+            if user:
+                customer_name = f"{user.first_name} {user.last_name}".strip() or None
+                customer_email = user.email
+                customer_phone = user.phone
+        except Exception:
+            pass
 
     # Parse shipping address snapshot
     shipping_address: dict | None = None
@@ -326,6 +342,10 @@ async def get_admin_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
         customer_email=customer_email,
         customer_phone=customer_phone,
         shipping_address=shipping_address,
+        is_guest_order=order.is_guest_order,
+        guest_email=order.guest_email,
+        guest_name=order.guest_name,
+        guest_phone=order.guest_phone,
     )
 
 

@@ -118,7 +118,7 @@ class OrderListItem(BaseModel):
 class AdminOrderListItem(BaseModel):
     id: UUID
     order_number: str
-    company_name: str
+    company_name: str | None
     status: str
     payment_status: str
     po_number: str | None
@@ -129,19 +129,23 @@ class AdminOrderListItem(BaseModel):
     courier: str | None = None
     courier_service: str | None = None
     shipped_at: datetime | None = None
+    # Guest order fields
+    is_guest_order: bool = False
+    guest_email: str | None = None
+    guest_name: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class AdminOrderDetail(OrderOut):
-    company_id: UUID
-    company_name: str
+    company_id: UUID | None
+    company_name: str | None
     tracking_number: str | None
     courier: str | None = None
     courier_service: str | None = None
     shipped_at: datetime | None = None
     qb_invoice_id: str | None
-    # Customer contact (enriched from User record)
+    # Customer contact (enriched from User record or guest fields)
     customer_name: str | None = None
     customer_email: str | None = None
     customer_phone: str | None = None
@@ -151,6 +155,11 @@ class AdminOrderDetail(OrderOut):
     tax_amount: Decimal | None = None
     payment_method: str | None = None
     pricing_tier: str | None = None
+    # Guest order
+    is_guest_order: bool = False
+    guest_email: str | None = None
+    guest_name: str | None = None
+    guest_phone: str | None = None
 
     model_config = {"from_attributes": True}
 
