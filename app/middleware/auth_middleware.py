@@ -68,7 +68,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
 
         # ── Skip auth for public paths ────────────────────────────────────────
+        # For public product/review routes: if a valid Bearer token is present,
+        # inject user state so pricing middleware can return tier pricing.
+        # If no token or invalid token, pass through silently as a guest.
         if self._is_public(path):
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
+                try:
+                    payload = decode_token(token)
+                    if payload.get("type") == "access":
+                        jti = payload.get("jti")
+                        if not (jti and await redis_exists(f"blacklist:{jti}")):
+                            request.state.user_id = payload.get("sub")
+                            request.state.is_admin = payload.get("is_admin", False)
+                            request.state.company_id = payload.get("company_id")
+                            request.state.pricing_tier_id = payload.get("pricing_tier_id")
+                            request.state.company_role = payload.get("company_role")
+                except (JWTError, Exception):
+                    pass  # Invalid/expired token — treat as guest, don't block
             return await call_next(request)
 
         # ── Extract Bearer token ──────────────────────────────────────────────
