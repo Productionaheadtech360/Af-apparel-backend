@@ -162,4 +162,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Guest checkout and order tracking — no auth required
         if path.startswith("/api/v1/guest"):
             return True
+        # Card tokenization — guests need this too (card-save is skipped when no company_id)
+        if path == "/api/v1/checkout/tokenize":
+            return True
         return False

@@ -71,9 +71,6 @@ async def tokenize_card(
     _log = _logging.getLogger(__name__)
 
     company_id = getattr(request.state, "company_id", None)
-    if not company_id:
-        raise ForbiddenError("Company account required")
-
     _log.info("tokenize_card called — company: %s (card save runs here, not at confirm)", company_id)
 
     from app.services.qb_payments_service import QBPaymentsService
@@ -93,7 +90,10 @@ async def tokenize_card(
     except RuntimeError as exc:
         raise ValidationError(str(exc)) from exc
 
-    # Auto-save card to QB customer wallet (raw card data is available here)
+    # Auto-save card to QB customer wallet — wholesale accounts only
+    if not company_id:
+        return {"token": token}
+
     try:
         from sqlalchemy import select as _select
         from app.models.company import Company as _Company
