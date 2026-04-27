@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, EmailStr, field_validator
+from pydantic import AnyHttpUrl, EmailStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,9 +81,16 @@ class Settings(BaseSettings):
     # ── Email (Resend) ────────────────────────────────────────────────────────
     RESEND_API_KEY: str = ""
     SENDGRID_API_KEY: str = ""  # kept for backward compat, unused
+    RESEND_FROM_EMAIL: str = ""
     EMAIL_FROM_ADDRESS: str = "noreply@karauxbaia.resend.app"
     EMAIL_FROM_NAME: str = "AF Apparels"
     ADMIN_NOTIFICATION_EMAIL: str = ""
+
+    @model_validator(mode="after")
+    def _apply_resend_from_email(self) -> "Settings":
+        if self.RESEND_FROM_EMAIL:
+            self.EMAIL_FROM_ADDRESS = self.RESEND_FROM_EMAIL
+        return self
     FRONTEND_URL: str = "http://localhost:3000"
 
     # ── AWS S3 ────────────────────────────────────────────────────────────────
