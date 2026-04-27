@@ -699,37 +699,176 @@ async def update_rma(
 
 
 # ---------------------------------------------------------------------------
-# Abandoned Carts — admin view
+# Abandoned Carts — admin view (live CartItem data, inactive > 1 hour)
 # ---------------------------------------------------------------------------
 
 @router.get("/abandoned-carts")
 async def admin_list_abandoned_carts(
     db: AsyncSession = Depends(get_db),
 ):
-    import json
-    from app.models.order import AbandonedCart
+    from datetime import timedelta
+    from app.models.order import CartItem
+    from app.models.product import ProductVariant, Product
+    from app.models.company import CompanyUser
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
     result = await db.execute(
-        select(AbandonedCart)
-        .order_by(AbandonedCart.abandoned_at.desc())
-        .limit(200)
+        select(CartItem)
+        .where(CartItem.updated_at < cutoff)
+        .order_by(CartItem.company_id, CartItem.updated_at.desc())
     )
-    carts = result.scalars().all()
+    items = result.scalars().all()
+
+    # Group by company_id
+    company_map: dict[str, list] = {}
+    for item in items:
+        key = str(item.company_id)
+        company_map.setdefault(key, []).append(item)
 
     out = []
-    for c in carts:
+    for company_id_str, cart_items in company_map.items():
         company = (await db.execute(
-            select(Company).where(Company.id == c.company_id)
+            select(Company).where(Company.id == cart_items[0].company_id)
         )).scalar_one_or_none()
+
+        # Get owner email
+        customer_email = None
+        owner_row = (await db.execute(
+            select(CompanyUser).where(
+                CompanyUser.company_id == cart_items[0].company_id,
+                CompanyUser.role == "owner",
+            )
+        )).scalar_one_or_none()
+        if owner_row:
+            owner_user = (await db.execute(
+                select(User).where(User.id == owner_row.user_id)
+            )).scalar_one_or_none()
+            if owner_user:
+                customer_email = owner_user.email
+
+        items_detail = []
+        total = 0.0
+        for ci in cart_items:
+            variant = (await db.execute(
+                select(ProductVariant).where(ProductVariant.id == ci.variant_id)
+            )).scalar_one_or_none()
+            product_name = ""
+            if variant:
+                prod = (await db.execute(
+                    select(Product).where(Product.id == variant.product_id)
+                )).scalar_one_or_none()
+                product_name = prod.name if prod else ""
+            unit = float(ci.unit_price or 0)
+            line = unit * ci.quantity
+            total += line
+            items_detail.append({
+                "variant_id": str(ci.variant_id),
+                "product_name": product_name,
+                "sku": variant.sku if variant else "",
+                "color": variant.color if variant else "",
+                "size": variant.size if variant else "",
+                "quantity": ci.quantity,
+                "unit_price": unit,
+                "line_total": line,
+            })
+
+        abandoned_at = max(ci.updated_at for ci in cart_items)
         out.append({
-            "id": str(c.id),
+            "id": company_id_str,
             "company_name": company.name if company else "Unknown",
-            "company_id": str(c.company_id),
-            "abandoned_at": c.abandoned_at,
-            "total": float(c.total),
-            "item_count": c.item_count,
-            "items": json.loads(c.items_snapshot),
-            "is_recovered": c.is_recovered,
-            "recovered_at": c.recovered_at,
+            "company_id": company_id_str,
+            "customer_email": customer_email,
+            "abandoned_at": abandoned_at.isoformat(),
+            "total": round(total, 2),
+            "item_count": len(cart_items),
+            "items": items_detail,
+            "is_recovered": False,
+            "recovered_at": None,
         })
-    return out
+
+    return sorted(out, key=lambda x: x["abandoned_at"], reverse=True)
+
+
+@router.post("/abandoned-carts/{company_id}/remind")
+async def send_abandoned_cart_reminder(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import timedelta
+    from app.models.order import CartItem
+    from app.models.product import ProductVariant, Product
+    from app.models.company import CompanyUser
+    from app.services.email_service import EmailService
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    result = await db.execute(
+        select(CartItem)
+        .where(CartItem.company_id == company_id, CartItem.updated_at < cutoff)
+    )
+    cart_items = result.scalars().all()
+    if not cart_items:
+        raise HTTPException(status_code=404, detail="No abandoned cart items found")
+
+    owner_row = (await db.execute(
+        select(CompanyUser).where(
+            CompanyUser.company_id == company_id, CompanyUser.role == "owner"
+        )
+    )).scalar_one_or_none()
+    if not owner_row:
+        raise HTTPException(status_code=404, detail="Company owner not found")
+    owner = (await db.execute(select(User).where(User.id == owner_row.user_id))).scalar_one_or_none()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner user not found")
+
+    rows_html = ""
+    total = 0.0
+    for ci in cart_items:
+        variant = (await db.execute(
+            select(ProductVariant).where(ProductVariant.id == ci.variant_id)
+        )).scalar_one_or_none()
+        prod = None
+        if variant:
+            prod = (await db.execute(
+                select(Product).where(Product.id == variant.product_id)
+            )).scalar_one_or_none()
+        unit = float(ci.unit_price or 0)
+        line = unit * ci.quantity
+        total += line
+        name = prod.name if prod else "Product"
+        details = " / ".join(filter(None, [variant.color if variant else None, variant.size if variant else None]))
+        rows_html += (
+            f'<tr>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f3f4f6">{name}'
+            f'{"<br><span style='font-size:11px;color:#9ca3af'>" + details + "</span>" if details else ""}'
+            f'</td>'
+            f'<td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center">{ci.quantity}</td>'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right">${unit:.2f}</td>'
+            f'</tr>'
+        )
+
+    EmailService(db).send_raw(
+        to_email=owner.email,
+        subject="You left items in your cart — AF Apparels",
+        body_html=_af_email(
+            f'<h2 style="color:#2A2830;margin:0 0 12px">Your cart is waiting!</h2>'
+            f'<p>Hi {owner.first_name or "there"},</p>'
+            f'<p>You have items saved in your AF Apparels cart. Complete your order before they sell out.</p>'
+            f'<table style="width:100%;border-collapse:collapse;margin:16px 0">'
+            f'<thead><tr>'
+            f'<th style="text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;padding:0 0 8px">Product</th>'
+            f'<th style="text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;padding:0 8px 8px">Qty</th>'
+            f'<th style="text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;padding:0 0 8px">Price</th>'
+            f'</tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            f'<tfoot><tr>'
+            f'<td colspan="2" style="padding:12px 0 0;text-align:right;font-weight:700;color:#2A2830">Total:</td>'
+            f'<td style="padding:12px 0 0;text-align:right;font-weight:800;font-size:18px;color:#1A5CFF">${total:.2f}</td>'
+            f'</tr></tfoot>'
+            f'</table>'
+            f'<p style="margin-top:24px">'
+            f'<a href="https://shop.afapparels.com/cart" style="background:#1A5CFF;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;display:inline-block">Complete Your Order</a>'
+            f'</p>'
+        ),
+    )
+    return {"message": f"Reminder sent to {owner.email}"}

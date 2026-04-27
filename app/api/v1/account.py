@@ -122,6 +122,25 @@ async def create_address(
     db.add(addr)
     await db.commit()
     await db.refresh(addr)
+    try:
+        user_id = getattr(request.state, "user_id", None)
+        if user_id:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user:
+                from app.services.email_service import EmailService
+                EmailService(db).send_raw(
+                    to_email=user.email,
+                    subject="New address added — AF Apparels",
+                    body_html=(
+                        f"<h2>Address Added</h2>"
+                        f"<p>Hi {user.first_name or 'there'},</p>"
+                        f"<p>A new shipping address has been added to your account: <strong>{payload.label or payload.full_name}</strong>.</p>"
+                        f"<p>If you did not make this change, please contact us immediately.</p>"
+                        f"<br><p>AF Apparels Team</p>"
+                    ),
+                )
+    except Exception:
+        pass
     return addr
 
 
@@ -203,12 +222,34 @@ async def delete_address(
     company_id = getattr(request.state, "company_id", None)
     if not company_id:
         raise ForbiddenError("Company account required")
+    addr = (await db.execute(
+        select(UserAddress).where(UserAddress.id == address_id, UserAddress.company_id == company_id)
+    )).scalar_one_or_none()
     await db.execute(
         delete(UserAddress).where(
             UserAddress.id == address_id, UserAddress.company_id == company_id
         )
     )
     await db.commit()
+    try:
+        user_id = getattr(request.state, "user_id", None)
+        if user_id and addr:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user:
+                from app.services.email_service import EmailService
+                EmailService(db).send_raw(
+                    to_email=user.email,
+                    subject="Address removed — AF Apparels",
+                    body_html=(
+                        f"<h2>Address Removed</h2>"
+                        f"<p>Hi {user.first_name or 'there'},</p>"
+                        f"<p>A shipping address has been removed from your account: <strong>{addr.label or addr.full_name}</strong>.</p>"
+                        f"<p>If you did not make this change, please contact us immediately.</p>"
+                        f"<br><p>AF Apparels Team</p>"
+                    ),
+                )
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +331,7 @@ async def add_payment_method(
         if not company.default_payment_method_id:
             company.default_payment_method_id = saved.get("id")
             await db.commit()
-        return {
+        result = {
             "id": saved.get("id"),
             "brand": saved.get("cardType", "Unknown"),
             "last4": (saved.get("number") or "")[-4:] or "****",
@@ -299,6 +340,28 @@ async def add_payment_method(
             "name": saved.get("name"),
             "is_default": not company.default_payment_method_id or company.default_payment_method_id == saved.get("id"),
         }
+        try:
+            user_id = getattr(request.state, "user_id", None)
+            if user_id:
+                user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+                if user:
+                    from app.services.email_service import EmailService
+                    last4 = result["last4"]
+                    brand = result["brand"]
+                    EmailService(db).send_raw(
+                        to_email=user.email,
+                        subject="Payment method added — AF Apparels",
+                        body_html=(
+                            f"<h2>Payment Method Added</h2>"
+                            f"<p>Hi {user.first_name or 'there'},</p>"
+                            f"<p>A new payment method has been added to your account: <strong>{brand} ending in {last4}</strong>.</p>"
+                            f"<p>If you did not make this change, please contact us immediately.</p>"
+                            f"<br><p>AF Apparels Team</p>"
+                        ),
+                    )
+        except Exception:
+            pass
+        return result
     except Exception as exc:
         raise ForbiddenError(f"Failed to save card: {exc}")
 
@@ -465,6 +528,21 @@ async def update_user_profile(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     await db.commit()
+    try:
+        from app.services.email_service import EmailService
+        EmailService(db).send_raw(
+            to_email=user.email,
+            subject="Your profile has been updated — AF Apparels",
+            body_html=(
+                f"<h2>Profile Updated</h2>"
+                f"<p>Hi {user.first_name or 'there'},</p>"
+                f"<p>Your AF Apparels account profile was successfully updated.</p>"
+                f"<p>If you did not make this change, please contact us immediately.</p>"
+                f"<br><p>AF Apparels Team</p>"
+            ),
+        )
+    except Exception:
+        pass
     return {"message": "User profile updated"}
 
 
@@ -490,6 +568,25 @@ async def update_company_profile(
         if hasattr(company, field):
             setattr(company, field, value)
     await db.commit()
+    try:
+        user_id = getattr(request.state, "user_id", None)
+        if user_id:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user:
+                from app.services.email_service import EmailService
+                EmailService(db).send_raw(
+                    to_email=user.email,
+                    subject="Company profile updated — AF Apparels",
+                    body_html=(
+                        f"<h2>Company Profile Updated</h2>"
+                        f"<p>Hi {user.first_name or 'there'},</p>"
+                        f"<p>The company profile for <strong>{company.name}</strong> was successfully updated.</p>"
+                        f"<p>If you did not make this change, please contact us immediately.</p>"
+                        f"<br><p>AF Apparels Team</p>"
+                    ),
+                )
+    except Exception:
+        pass
     return {"message": "Company profile updated"}
 
 

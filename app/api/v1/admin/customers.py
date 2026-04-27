@@ -167,6 +167,7 @@ async def create_company(
 async def export_companies_csv(
     q: str | None = None,
     status: str | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
     import csv
@@ -184,6 +185,44 @@ async def export_companies_csv(
             c.get("phone") or "", c["status"], c["order_count"],
             str(c["total_spend"]), c["created_at"].isoformat(),
         ])
+    try:
+        from app.services.email_service import EmailService as _EmailSvc
+        admin_user_id = getattr(request.state, "user_id", None) if request else None
+        if admin_user_id:
+            from sqlalchemy import select as _sel
+            admin = (await db.execute(_sel(User).where(User.id == admin_user_id))).scalar_one_or_none()
+            if admin and admin.email:
+                filter_desc = f"status={status}" if status else "all statuses"
+                if q:
+                    filter_desc += f', search="{q}"'
+                _EmailSvc(db).send_raw(
+                    to_email=admin.email,
+                    subject="Customers CSV Export Complete — AF Apparels",
+                    body_html=(
+                        '<div style="font-family:sans-serif;max-width:600px;margin:0 auto">'
+                        '<div style="background:#080808;padding:24px;text-align:center">'
+                        '<span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>'
+                        '<span style="font-size:36px;font-weight:900;color:#E8242A">F</span>'
+                        '<span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>'
+                        '</div>'
+                        '<div style="padding:32px;background:#fff">'
+                        f'<h2 style="color:#2A2830;margin:0 0 12px">Export Complete</h2>'
+                        f'<p>Hi {admin.first_name or "there"},</p>'
+                        f'<p>Your customers CSV export has been generated successfully.</p>'
+                        f'<div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">'
+                        f'<p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Rows Exported</p>'
+                        f'<p style="margin:4px 0 0;font-weight:800;font-size:24px;color:#2A2830">{len(companies)}</p>'
+                        f'<p style="margin:12px 0 0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Filters</p>'
+                        f'<p style="margin:4px 0 0;font-size:13px;color:#2A2830">{filter_desc}</p>'
+                        f'</div>'
+                        f'<p style="color:#6b7280;font-size:13px">The file was downloaded directly to your browser.</p>'
+                        '<p style="color:#9ca3af;font-size:12px;margin-top:24px">Questions? Call (214)&nbsp;272-7213 or email info.afapparel@gmail.com</p>'
+                        '<p style="color:#9ca3af;font-size:12px">— AF Apparels Team</p>'
+                        '</div></div>'
+                    ),
+                )
+    except Exception:
+        pass
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),

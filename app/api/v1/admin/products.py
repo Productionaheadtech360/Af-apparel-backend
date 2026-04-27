@@ -636,3 +636,61 @@ async def _process_and_upload_image(
             urls[f"{size_name}_webp"] = f"/media/{base_key}_{size_name}.webp"
 
     return urls
+
+
+# ---------------------------------------------------------------------------
+# Generic image upload (collections, categories, etc.)
+# ---------------------------------------------------------------------------
+
+@router.post("/upload-image")
+async def upload_generic_image(
+    file: UploadFile = File(...),
+):
+    """Upload an image to S3 and return URLs. Used for collections and other non-product assets."""
+    import uuid as _uuid
+    import io as _io
+    import os
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    use_s3 = bool(settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY)
+
+    content = await file.read()
+    asset_id = str(_uuid.uuid4())
+    filename = file.filename or "image"
+    base_name = filename.rsplit(".", 1)[0]
+    base_key = f"uploads/{asset_id}/{base_name}"
+
+    from PIL import Image as PILImage
+    img = PILImage.open(_io.BytesIO(content)).convert("RGB")
+    img.thumbnail((800, 800), PILImage.LANCZOS)
+
+    if use_s3:
+        import boto3
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION,
+        )
+        bucket = settings.AWS_S3_BUCKET
+        cdn = settings.CDN_BASE_URL.rstrip("/") if settings.CDN_BASE_URL else f"https://{bucket}.s3.amazonaws.com"
+
+        jpeg_buf = _io.BytesIO()
+        img.save(jpeg_buf, "JPEG", quality=85, optimize=True)
+        jpeg_key = f"{base_key}.jpg"
+        s3.put_object(Bucket=bucket, Key=jpeg_key, Body=jpeg_buf.getvalue(), ContentType="image/jpeg")
+        url = f"{cdn}/{jpeg_key}"
+
+        webp_buf = _io.BytesIO()
+        img.save(webp_buf, "WEBP", quality=85)
+        webp_key = f"{base_key}.webp"
+        s3.put_object(Bucket=bucket, Key=webp_key, Body=webp_buf.getvalue(), ContentType="image/webp")
+    else:
+        local_dir = f"/app/media/uploads/{asset_id}"
+        os.makedirs(local_dir, exist_ok=True)
+        jpeg_path = f"{local_dir}/{base_name}.jpg"
+        img.save(jpeg_path, "JPEG", quality=85, optimize=True)
+        url = f"/media/uploads/{asset_id}/{base_name}.jpg"
+
+    return {"url": url}
