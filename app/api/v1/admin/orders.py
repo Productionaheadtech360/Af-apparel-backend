@@ -837,10 +837,10 @@ async def send_abandoned_cart_reminder(
         total += line
         name = prod.name if prod else "Product"
         details = " / ".join(filter(None, [variant.color if variant else None, variant.size if variant else None]))
+        details_html = f'<br><span style="font-size:11px;color:#9ca3af">{details}</span>' if details else ""
         rows_html += (
             f'<tr>'
-            f'<td style="padding:8px 0;border-bottom:1px solid #f3f4f6">{name}'
-            f'{"<br><span style='font-size:11px;color:#9ca3af'>" + details + "</span>" if details else ""}'
+            f'<td style="padding:8px 0;border-bottom:1px solid #f3f4f6">{name}{details_html}'
             f'</td>'
             f'<td style="padding:8px;border-bottom:1px solid #f3f4f6;text-align:center">{ci.quantity}</td>'
             f'<td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right">${unit:.2f}</td>'
