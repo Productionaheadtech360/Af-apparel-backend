@@ -5,7 +5,7 @@ import json as _json
 from datetime import date, datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,75 +32,181 @@ from app.types.api import PaginatedResponse
 router = APIRouter(prefix="/admin", tags=["admin-orders"])
 
 
+def _af_email(content_html: str) -> str:
+    """Wrap content in the AF Apparels branded email shell."""
+    return (
+        '<div style="font-family:sans-serif;max-width:600px;margin:0 auto">'
+        '<div style="background:#080808;padding:24px;text-align:center">'
+        '<span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>'
+        '<span style="font-size:36px;font-weight:900;color:#E8242A">F</span>'
+        '<span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>'
+        '</div>'
+        '<div style="padding:32px;background:#fff">'
+        + content_html
+        + '<p style="color:#9ca3af;font-size:12px;margin-top:24px">'
+        'Questions? Call (214)&nbsp;272-7213 or email info.afapparel@gmail.com</p>'
+        '<p style="color:#9ca3af;font-size:12px">— AF Apparels Team</p>'
+        '</div></div>'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Email helper
 # ---------------------------------------------------------------------------
 
 async def _send_order_status_email(order: Order, new_status: str, db: AsyncSession) -> None:
-    """Send email when order status changes."""
+    """Send order status update to the customer — all statuses, guest + wholesale."""
+    import logging as _log_mod
+    _log = _log_mod.getLogger(__name__)
     try:
-        from sqlalchemy import select as _select
-        from app.models.user import User
-        from app.models.company import Company as _Company
-        from app.models.company import CompanyUser
         from app.services.email_service import EmailService
-        from app.core.config import settings
+        from app.core.config import settings as _settings
+
+        _LABEL = {
+            "pending": "Order Received", "confirmed": "Order Confirmed",
+            "processing": "In Production", "ready_for_pickup": "Ready for Pickup",
+            "shipped": "Shipped", "delivered": "Delivered",
+            "cancelled": "Cancelled", "refunded": "Refunded",
+        }
+        _COLOR = {
+            "pending": "#f59e0b", "confirmed": "#3b82f6", "processing": "#8b5cf6",
+            "ready_for_pickup": "#0891b2", "shipped": "#059669", "delivered": "#059669",
+            "cancelled": "#ef4444", "refunded": "#6b7280",
+        }
+        label = _LABEL.get(new_status, new_status.replace("_", " ").title())
+        color = _COLOR.get(new_status, "#7A7880")
+        email_svc = EmailService(db)
+
+        # ── Guest orders ─────────────────────────────────────────────────────
+        if order.is_guest_order and order.guest_email:
+            name = order.guest_name or "there"
+            if new_status == "shipped":
+                tracking_block = ""
+                if order.tracking_number:
+                    carrier_line = (
+                        f'<p style="margin:4px 0 0;color:#166534">Carrier: <b>{order.courier}</b></p>'
+                        if order.courier else ""
+                    )
+                    tracking_block = (
+                        '<div style="background:#f0fdf4;border:1px solid #bbf7d0;'
+                        'border-radius:8px;padding:16px;margin:16px 0">'
+                        '<p style="margin:0 0 4px;font-weight:700;color:#166534">Tracking Information</p>'
+                        f'<p style="margin:0;color:#166534">Tracking #: <b>{order.tracking_number}</b></p>'
+                        f'{carrier_line}</div>'
+                    )
+                email_svc.send_raw(
+                    to_email=order.guest_email,
+                    subject=f"Your Order {order.order_number} Has Shipped!",
+                    body_html=_af_email(
+                        f'<h2 style="color:#059669;margin:0 0 12px">Your Order Has Shipped! &#128230;</h2>'
+                        f'<p>Hi {name},</p>'
+                        f'<p>Great news &#8212; your AF Apparels order is on its way!</p>'
+                        f'<div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">'
+                        f'<p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Order Number</p>'
+                        f'<p style="margin:4px 0 0;font-weight:800;font-size:18px;color:#2A2830">{order.order_number}</p>'
+                        f'</div>'
+                        f'{tracking_block}'
+                        f'<p style="margin:20px 0">'
+                        f'<a href="{_settings.FRONTEND_URL}/track-order"'
+                        f' style="background:#E8242A;color:#fff;padding:12px 24px;border-radius:6px;'
+                        f'text-decoration:none;font-weight:700;display:inline-block">'
+                        f'Track Your Order &rarr;</a></p>'
+                    ),
+                )
+            else:
+                help_line = (
+                    f'<p>Need help? Visit <a href="{_settings.FRONTEND_URL}/track-order"'
+                    f' style="color:#1A5CFF">our order tracking page</a>.</p>'
+                    if new_status in ("cancelled", "refunded") else ""
+                )
+                email_svc.send_raw(
+                    to_email=order.guest_email,
+                    subject=f"Order {order.order_number} Update &#8212; {label}",
+                    body_html=_af_email(
+                        f'<h2 style="color:{color};margin:0 0 12px">Order Update: {label}</h2>'
+                        f'<p>Hi {name},</p>'
+                        f'<p>Your order status has been updated.</p>'
+                        f'<div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">'
+                        f'<p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Order Number</p>'
+                        f'<p style="margin:4px 0 0;font-weight:800;font-size:18px;color:#2A2830">{order.order_number}</p>'
+                        f'<p style="margin:12px 0 0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">New Status</p>'
+                        f'<p style="margin:4px 0 0;font-weight:700;color:{color}">{label}</p>'
+                        f'</div>'
+                        f'{help_line}'
+                    ),
+                )
+            return
+
+        # ── Wholesale orders ─────────────────────────────────────────────────
+        from sqlalchemy import select as _select
+        from app.models.user import User as _User
+        from app.models.company import CompanyUser as _CompanyUser
 
         user_result = await db.execute(
-            _select(User)
-            .join(CompanyUser, CompanyUser.user_id == User.id)
-            .where(CompanyUser.company_id == order.company_id, CompanyUser.is_active == True)
+            _select(_User)
+            .join(_CompanyUser, _CompanyUser.user_id == _User.id)
+            .where(_CompanyUser.company_id == order.company_id, _CompanyUser.is_active == True)
             .limit(1)
         )
         user = user_result.scalar_one_or_none()
         if not user:
             return
 
-        email_svc = EmailService(db)
+        first = user.first_name or "there"
+        order_url = f"{_settings.FRONTEND_URL}/account/orders/{order.id}"
 
         if new_status == "shipped":
-            await email_svc.send(
-                trigger_event="order_shipped",
-                to_email=user.email,
-                variables={
-                    "first_name": user.first_name or "there",
-                    "order_number": order.order_number,
-                    "courier": order.courier or "Carrier",
-                    "tracking_number": order.tracking_number or "N/A",
-                },
-            )
-            if settings.ADMIN_NOTIFICATION_EMAIL:
-                email_svc.send_raw(
-                    to_email=settings.ADMIN_NOTIFICATION_EMAIL,
-                    subject=f"Order Shipped — {order.order_number}",
-                    body_html=f"<p>Order <b>{order.order_number}</b> marked as shipped. Tracking: {order.tracking_number or 'N/A'}</p>",
+            try:
+                await email_svc.send(
+                    trigger_event="order_shipped",
+                    to_email=user.email,
+                    variables={
+                        "first_name": first,
+                        "order_number": order.order_number,
+                        "courier": order.courier or "Carrier",
+                        "tracking_number": order.tracking_number or "N/A",
+                    },
                 )
-
-        elif new_status == "cancelled":
+            except Exception:
+                # Template may not exist — fall back to raw
+                email_svc.send_raw(
+                    to_email=user.email,
+                    subject=f"Order {order.order_number} Has Shipped!",
+                    body_html=_af_email(
+                        f'<h2 style="color:#059669;margin:0 0 12px">Your Order Has Shipped! &#128230;</h2>'
+                        f'<p>Hi {first},</p>'
+                        f'<p>Order <b>{order.order_number}</b> is on its way.</p>'
+                        + (f'<p><b>Tracking #:</b> {order.tracking_number}</p>' if order.tracking_number else "")
+                        + (f'<p><b>Carrier:</b> {order.courier}</p>' if order.courier else "")
+                        + f'<p style="margin:20px 0"><a href="{order_url}"'
+                        f' style="background:#E8242A;color:#fff;padding:12px 24px;border-radius:6px;'
+                        f'text-decoration:none;font-weight:700;display:inline-block">View Order &rarr;</a></p>'
+                    ),
+                )
+        else:
+            help_line = (
+                '<p style="color:#6b7280;font-size:13px">Questions? Contact your account manager.</p>'
+                if new_status in ("cancelled", "refunded") else ""
+            )
             email_svc.send_raw(
                 to_email=user.email,
-                subject=f"Order {order.order_number} Cancelled",
-                body_html=f"""
-                    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-                    <div style="background:#080808;padding:24px;text-align:center">
-                        <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
-                        <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
-                        <span style="color:#fff;font-size:14px;margin-left:8px">APPARELS</span>
-                    </div>
-                    <div style="padding:32px;background:#fff">
-                        <h2>Order Cancelled</h2>
-                        <p>Hi {user.first_name or 'there'},</p>
-                        <p>Your order <b>{order.order_number}</b> has been cancelled.</p>
-                        <p>Questions? Call (214) 272-7213</p>
-                        <p>— AF Apparels Team</p>
-                    </div>
-                    </div>
-                """,
+                subject=f"Order {order.order_number} &#8212; {label}",
+                body_html=_af_email(
+                    f'<h2 style="color:{color};margin:0 0 12px">Order Update: {label}</h2>'
+                    f'<p>Hi {first},</p>'
+                    f'<p>Your order <b>{order.order_number}</b> has been updated to '
+                    f'<b style="color:{color}">{label}</b>.</p>'
+                    f'<p style="margin:20px 0">'
+                    f'<a href="{order_url}" style="background:#1A5CFF;color:#fff;padding:12px 24px;'
+                    f'border-radius:6px;text-decoration:none;font-weight:700;display:inline-block">'
+                    f'View Order &rarr;</a></p>'
+                    f'{help_line}'
+                ),
             )
 
-    except Exception as e:
+    except Exception as exc:
         import logging
-        logging.getLogger(__name__).warning("Order status email failed: %s", e)
+        logging.getLogger(__name__).warning("Order status email failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +342,7 @@ async def list_admin_orders(
 async def export_orders_csv(
     q: str | None = None,
     status: str | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import outerjoin as _outerjoin
@@ -259,6 +366,37 @@ async def export_orders_csv(
             order.order_number, display_name, order.status, order.payment_status,
             order.po_number or "", str(order.total), order.created_at.isoformat(),
         ])
+    # Email the admin who triggered the export
+    try:
+        from app.models.user import User as _ExportUser
+        from app.services.email_service import EmailService as _ExportEmailSvc
+        from app.core.config import settings as _exp_settings
+        admin_user_id = getattr(request.state, "user_id", None) if request else None
+        if admin_user_id:
+            admin = (await db.execute(select(_ExportUser).where(_ExportUser.id == admin_user_id))).scalar_one_or_none()
+            if admin and admin.email:
+                filter_desc = f"status={status}" if status else "all statuses"
+                if q:
+                    filter_desc += f', search=&ldquo;{q}&rdquo;'
+                _ExportEmailSvc(db).send_raw(
+                    to_email=admin.email,
+                    subject="Orders CSV Export Complete &#8212; AF Apparels",
+                    body_html=_af_email(
+                        f'<h2 style="color:#2A2830;margin:0 0 12px">Export Complete</h2>'
+                        f'<p>Hi {admin.first_name or "there"},</p>'
+                        f'<p>Your orders CSV export has been generated successfully.</p>'
+                        f'<div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">'
+                        f'<p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Rows Exported</p>'
+                        f'<p style="margin:4px 0 0;font-weight:800;font-size:24px;color:#2A2830">{len(rows)}</p>'
+                        f'<p style="margin:12px 0 0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Filters</p>'
+                        f'<p style="margin:4px 0 0;font-size:13px;color:#2A2830">{filter_desc}</p>'
+                        f'</div>'
+                        f'<p style="color:#6b7280;font-size:13px">The file was downloaded directly to your browser.</p>'
+                    ),
+                )
+    except Exception:
+        pass
+
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
@@ -549,6 +687,13 @@ async def update_rma(
     if payload.admin_notes:
         rma.admin_notes = payload.admin_notes
     await db.commit()
+
+    # Notify customer of status change
+    try:
+        from app.tasks.email_tasks import send_rma_status_email
+        send_rma_status_email.delay(str(rma_id))
+    except Exception:
+        pass
 
     return {"message": f"RMA {payload.status}"}
 

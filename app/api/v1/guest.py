@@ -182,6 +182,7 @@ async def guest_checkout(
         shipping_cost=shipping_cost,
         tax_amount=Decimal("0"),
         total=total,
+        shipping_method=method,
         shipping_address_snapshot=address_snapshot,
     )
     db.add(order)

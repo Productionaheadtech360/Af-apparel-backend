@@ -155,6 +155,8 @@ class AdminOrderDetail(OrderOut):
     tax_amount: Decimal | None = None
     payment_method: str | None = None
     pricing_tier: str | None = None
+    # Shipping method
+    shipping_method: str | None = None
     # Guest order
     is_guest_order: bool = False
     guest_email: str | None = None

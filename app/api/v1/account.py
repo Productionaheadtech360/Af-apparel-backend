@@ -1063,6 +1063,44 @@ async def create_rma(
 
     await db.commit()
     await db.refresh(rma)
+
+    # Confirm RMA submission to the customer
+    try:
+        from app.services.email_service import EmailService as _RMAES
+        from app.core.config import settings as _rma_settings
+        _rma_user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if _rma_user:
+            _RMAES(db).send_raw(
+                to_email=_rma_user.email,
+                subject=f"RMA Request Received &#8212; {rma_number}",
+                body_html=(
+                    '<div style="font-family:sans-serif;max-width:600px;margin:0 auto">'
+                    '<div style="background:#080808;padding:24px;text-align:center">'
+                    '<span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>'
+                    '<span style="font-size:36px;font-weight:900;color:#E8242A">F</span>'
+                    '<span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>'
+                    '</div>'
+                    '<div style="padding:32px;background:#fff">'
+                    f'<h2 style="color:#2A2830;margin:0 0 12px">Return Request Received</h2>'
+                    f'<p>Hi {_rma_user.first_name or "there"},</p>'
+                    f'<p>We&#39;ve received your return/exchange request and will review it within 2&#8211;3 business days.</p>'
+                    '<div style="background:#f9fafb;border-radius:8px;padding:16px;margin:16px 0">'
+                    '<p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">RMA Number</p>'
+                    f'<p style="margin:4px 0 0;font-weight:800;font-size:18px;color:#2A2830">{rma_number}</p>'
+                    '<p style="margin:12px 0 0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.06em">Reason</p>'
+                    f'<p style="margin:4px 0 0;font-size:13px;color:#2A2830">{payload.reason}</p>'
+                    '</div>'
+                    f'<p style="margin:20px 0"><a href="{_rma_settings.FRONTEND_URL}/account/rma"'
+                    ' style="background:#1A5CFF;color:#fff;padding:12px 24px;border-radius:6px;'
+                    'text-decoration:none;font-weight:700;display:inline-block">View My Returns &rarr;</a></p>'
+                    '<p style="color:#9ca3af;font-size:12px;margin-top:24px">Questions? Call (214)&nbsp;272-7213</p>'
+                    '<p style="color:#9ca3af;font-size:12px">&#8212; AF Apparels Team</p>'
+                    '</div></div>'
+                ),
+            )
+    except Exception:
+        pass
+
     return rma
 
 

@@ -213,6 +213,7 @@ class OrderService:
             shipping_cost=shipping_cost,
             tax_amount=Decimal("0"),
             total=total,
+            shipping_method=shipping_method,
             shipping_address_id=confirm.address_id if confirm.address_id else None,
             shipping_address_snapshot=_json.dumps(shipping_address) if shipping_address else None,
         )

@@ -33,9 +33,9 @@ class Order(BaseModel):
     guest_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_guest_order: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Status: pending | confirmed | processing | shipped | delivered | cancelled | refunded
+    # Status: pending | confirmed | processing | ready_for_pickup | shipped | delivered | cancelled | refunded
     status: Mapped[str] = mapped_column(
-        Enum("pending", "confirmed", "processing", "shipped", "delivered", "cancelled", "refunded",
+        Enum("pending", "confirmed", "processing", "ready_for_pickup", "shipped", "delivered", "cancelled", "refunded",
              name="order_status"),
         default="pending",
         nullable=False,
@@ -69,6 +69,7 @@ class Order(BaseModel):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
 
     # Shipping
+    shipping_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(255))
     carrier: Mapped[str | None] = mapped_column(String(100))
     courier: Mapped[str | None] = mapped_column(String(100))
