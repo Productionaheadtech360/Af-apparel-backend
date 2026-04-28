@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.core.redis import redis_delete, redis_get, redis_set
-from app.models.product import Category, Product, ProductCategory, ProductVariant, ProductImage
+from app.models.product import Category, Product, ProductAsset, ProductCategory, ProductVariant, ProductImage
 from app.schemas.product import FilterParams
 
 logger = logging.getLogger(__name__)
@@ -174,6 +174,7 @@ class ProductService:
             .options(
                 selectinload(Product.variants),
                 selectinload(Product.images),
+                selectinload(Product.assets),
                 selectinload(Product.category_links).selectinload(
                     ProductCategory.category
                 ).selectinload(Category.children),
@@ -536,6 +537,10 @@ def _product_to_dict(product: Product) -> dict:
         "care_instructions": getattr(product, "care_instructions", None),
         "print_guide": getattr(product, "print_guide", None),
         "size_chart_data": getattr(product, "size_chart_data", None),
+        "assets": [
+            {"id": str(a.id), "asset_type": a.asset_type, "url": a.url, "file_name": a.file_name}
+            for a in getattr(product, "assets", [])
+        ],
     }
 
 

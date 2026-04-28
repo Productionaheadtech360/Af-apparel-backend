@@ -40,6 +40,17 @@ async def redis_delete(key: str) -> None:
     await r.delete(key)
 
 
+async def redis_delete_pattern(pattern: str) -> int:
+    """Delete all keys matching a glob pattern. Returns number of keys deleted."""
+    r = get_redis_pool()
+    keys = []
+    async for k in r.scan_iter(match=pattern, count=100):
+        keys.append(k)
+    if keys:
+        return await r.delete(*keys)
+    return 0
+
+
 async def redis_exists(key: str) -> bool:
     r = get_redis_pool()
     return bool(await r.exists(key))

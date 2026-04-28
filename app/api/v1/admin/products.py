@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
-from app.core.redis import redis_delete
+from app.core.redis import redis_delete, redis_delete_pattern
 from app.models.product import Category, Product, ProductAsset, ProductCategory, ProductImage, ProductVariant
 from app.schemas.product import (
     BulkActionRequest,
@@ -493,6 +493,7 @@ async def get_admin_product(slug: str, db: AsyncSession = Depends(get_db)):
     query = query.options(
         selectinload(Product.variants).selectinload(ProductVariant.inventory_records),
         selectinload(Product.images),
+        selectinload(Product.assets),
         selectinload(Product.category_links)
         .selectinload(ProductCategory.category)
         .selectinload(Category.children),
@@ -703,6 +704,8 @@ async def upload_product_flyer(
     await db.commit()
     await db.refresh(new_asset)
 
+    await redis_delete_pattern(f"products:detail:{product.slug}:*")
+
     return {"url": url, "file_name": file_name, "id": str(new_asset.id)}
 
 
@@ -727,6 +730,8 @@ async def delete_product_flyer(
 
     if not deleted:
         raise HTTPException(status_code=404, detail="No flyer to remove")
+
+    await redis_delete_pattern(f"products:detail:{product.slug}:*")
     return {"message": "Flyer removed"}
 
 

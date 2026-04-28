@@ -95,6 +95,19 @@ class ProductListItem(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Product asset
+# ---------------------------------------------------------------------------
+
+class ProductAssetOut(BaseModel):
+    id: UUID
+    asset_type: str
+    url: str
+    file_name: str
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
 # Product detail (full)
 # ---------------------------------------------------------------------------
 
@@ -122,6 +135,7 @@ class ProductDetail(BaseModel):
     care_instructions: str | None = None
     print_guide: dict | None = None
     size_chart_data: list | None = None
+    assets: list[ProductAssetOut] = []
 
     model_config = {"from_attributes": True}
 
