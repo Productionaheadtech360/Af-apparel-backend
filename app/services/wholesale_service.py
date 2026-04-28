@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.company import Company, CompanyUser
+from app.models.discount_group import DiscountGroup
 from app.models.user import User
 from app.models.wholesale import WholesaleApplication
 from app.schemas.wholesale import ApproveApplicationRequest, RejectApplicationRequest
@@ -88,6 +89,15 @@ class WholesaleService:
         )
         self.db.add(company)
         await self.db.flush()
+
+        # Assign discount group via company tags
+        if data.discount_group_id:
+            dg_result = await self.db.execute(
+                select(DiscountGroup).where(DiscountGroup.id == data.discount_group_id)
+            )
+            dg = dg_result.scalar_one_or_none()
+            if dg and dg.customer_tag:
+                company.tags = [dg.customer_tag]
 
         # Find the user by email and assign to company as owner
         user_result = await self.db.execute(
