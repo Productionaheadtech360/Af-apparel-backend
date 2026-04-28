@@ -4,12 +4,12 @@ import logging
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import exists, func, or_, select, text
+from sqlalchemy import exists, func, inspect as sa_inspect, or_, select, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.core.redis import redis_delete, redis_get, redis_set
+from app.core.redis import redis_delete, redis_delete_pattern, redis_get, redis_set
 from app.models.product import Category, Product, ProductAsset, ProductCategory, ProductVariant, ProductImage
 from app.schemas.product import FilterParams
 
@@ -72,6 +72,7 @@ class ProductService:
             .options(
                 selectinload(Product.variants),
                 selectinload(Product.images),
+                selectinload(Product.assets),
                 selectinload(Product.category_links).selectinload(
                     ProductCategory.category
                 ).selectinload(Category.children),
@@ -289,8 +290,8 @@ class ProductService:
 
     async def invalidate_product_cache(self, slug: str | None = None) -> None:
         if slug:
-            await redis_delete(f"products:detail:{slug}:*")
-        # Listing cache invalidation is approximate (TTL-based)
+            await redis_delete_pattern(f"products:detail:{slug}:*")
+        await redis_delete_pattern("products:list:*")
 
     # ------------------------------------------------------------------
     # Admin methods (T104 — Phase 10)
@@ -509,6 +510,20 @@ class ProductService:
 #         "updated_at": str(product.updated_at),
 #     }
 
+
+def _loaded_assets(product: Product) -> list:
+    """Return assets only if they were eagerly loaded; never trigger a lazy load."""
+    try:
+        if "assets" in sa_inspect(product).unloaded:
+            return []
+        return [
+            {"id": str(a.id), "asset_type": a.asset_type, "url": a.url, "file_name": a.file_name}
+            for a in product.assets
+        ]
+    except Exception:
+        return []
+
+
 def _product_to_dict(product: Product) -> dict:
     images = getattr(product, "images", []) or []
     primary = next((img for img in images if getattr(img, "is_primary", False)), None)
@@ -537,10 +552,7 @@ def _product_to_dict(product: Product) -> dict:
         "care_instructions": getattr(product, "care_instructions", None),
         "print_guide": getattr(product, "print_guide", None),
         "size_chart_data": getattr(product, "size_chart_data", None),
-        "assets": [
-            {"id": str(a.id), "asset_type": a.asset_type, "url": a.url, "file_name": a.file_name}
-            for a in getattr(product, "assets", [])
-        ],
+        "assets": _loaded_assets(product),
     }
 
 
