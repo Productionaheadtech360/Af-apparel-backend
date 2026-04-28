@@ -51,6 +51,7 @@ async def list_admin_products(
     query = select(Product).options(
         selectinload(Product.variants).selectinload(ProductVariant.inventory_records),
         selectinload(Product.images),
+        selectinload(Product.assets),
         selectinload(Product.category_links)
         .selectinload(ProductCategory.category)
         .selectinload(Category.children),

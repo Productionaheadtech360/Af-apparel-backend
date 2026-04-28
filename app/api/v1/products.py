@@ -176,6 +176,11 @@ async def download_product_flyer(
     if not flyer:
         raise HTTPException(status_code=404, detail="No flyer available for this product")
 
+    # If already a full HTTPS URL (e.g. direct S3 link), redirect to it immediately
+    if flyer.url.startswith("https://"):
+        return RedirectResponse(url=flyer.url)
+
+    # For bare S3 keys, generate a presigned URL if credentials are available
     if settings.AWS_ACCESS_KEY_ID:
         s3 = boto3.client(
             "s3",
@@ -183,11 +188,7 @@ async def download_product_flyer(
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION,
         )
-        url = flyer.url
-        if url.startswith("https://"):
-            key = url.split(".amazonaws.com/", 1)[-1]
-        else:
-            key = url.lstrip("/")
+        key = flyer.url.lstrip("/")
         presigned = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.AWS_S3_BUCKET, "Key": key},
