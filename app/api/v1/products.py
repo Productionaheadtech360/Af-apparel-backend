@@ -204,18 +204,42 @@ async def email_product_flyer(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue an email task to send the product flyer to the authenticated user."""
-    from app.models.product import Product, ProductAsset
-    from app.models.user import User
+    """Send a product flyer email to specified recipients (public, protected by reCAPTCHA)."""
+    from app.models.product import Product
+    from app.core.config import settings as _settings
+    from app.services.email_service import EmailService
 
-    user_id = getattr(request.state, "user_id", None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    payload = await request.json()
+    from_email: str = payload.get("from_email", "").strip()
+    to_raw: str = payload.get("to", "").strip()
+    cc_raw: str = payload.get("cc", "").strip()
+    subject: str = payload.get("subject", "").strip()
+    message: str = payload.get("message", "").strip()
+    recaptcha_token = payload.get("recaptcha_token")
+
+    to_emails = [e.strip() for e in to_raw.split(",") if e.strip()]
+    cc_emails = [e.strip() for e in cc_raw.split(",") if e.strip()]
+
+    if not to_emails:
+        raise HTTPException(status_code=422, detail="At least one recipient (To) is required")
+    if not subject:
+        raise HTTPException(status_code=422, detail="Subject is required")
+
+    # Verify reCAPTCHA
+    if _settings.RECAPTCHA_SECRET_KEY:
+        if not recaptcha_token:
+            raise HTTPException(status_code=422, detail="reCAPTCHA verification required")
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={"secret": _settings.RECAPTCHA_SECRET_KEY, "response": recaptcha_token},
+            )
+            if not resp.json().get("success"):
+                raise HTTPException(status_code=422, detail="reCAPTCHA verification failed")
 
     result = await db.execute(
-        select(Product)
-        .options(selectinload(Product.assets))
-        .where(Product.id == product_id)
+        select(Product).options(selectinload(Product.assets)).where(Product.id == product_id)
     )
     product = result.scalar_one_or_none()
     if not product:
@@ -225,31 +249,46 @@ async def email_product_flyer(
     if not flyer:
         raise HTTPException(status_code=404, detail="No flyer available for this product")
 
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    reply_to_line = f'<p style="font-size:12px;color:#7A7880">Reply to: {from_email}</p>' if from_email else ""
+    message_block = f'<p style="margin:0 0 20px;color:#374151;font-size:14px;line-height:1.7;white-space:pre-line">{message}</p>' if message else ""
 
-    first_name = getattr(user, "first_name", None) or user.email.split("@")[0]
-    from app.services.email_service import EmailService
-    svc = EmailService(db)
-    svc.send_raw(
-        to_email=user.email,
-        subject=f"Product Flyer — {product.name}",
-        body_html=f"""
-        <h2 style="font-family:sans-serif;color:#2A2830">Product Flyer</h2>
-        <p>Hi {first_name},</p>
-        <p>Here is the flyer for <strong>{product.name}</strong>:</p>
-        <p>
-          <a href="{flyer.url}" style="background:#1A5CFF;color:#fff;padding:10px 20px;border-radius:6px;
-             text-decoration:none;display:inline-block;font-weight:bold">
-            View / Download Flyer
+    body_html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#080808;padding:24px;text-align:center">
+        <span style="font-size:36px;font-weight:900;color:#1A5CFF">A</span>
+        <span style="font-size:36px;font-weight:900;color:#E8242A">F</span>
+        <span style="color:#fff;font-size:14px;margin-left:8px;letter-spacing:.1em">APPARELS</span>
+      </div>
+      <div style="padding:32px;background:#fff">
+        <h2 style="font-family:sans-serif;color:#2A2830;margin:0 0 8px">Product Flyer — {product.name}</h2>
+        {reply_to_line}
+        <hr style="border:none;border-top:1px solid #E2E0DA;margin:16px 0">
+        {message_block}
+        <p style="margin:0 0 20px;color:#374151;font-size:14px">
+          Please find the product flyer for <strong>{product.name}</strong> below:
+        </p>
+        <p style="margin:24px 0">
+          <a href="{flyer.url}"
+             style="background:#1A5CFF;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;display:inline-block">
+            View / Download Flyer (PDF)
           </a>
         </p>
-        <p style="color:#7A7880;font-size:13px">AF Apparels Wholesale</p>
-        """,
-    )
-    return {"message": f"Flyer for '{product.name}' sent to {user.email}"}
+        <p style="color:#7A7880;font-size:12px;margin:24px 0 0">AF Apparels Wholesale · af-apparel.com</p>
+      </div>
+    </div>
+    """
+
+    svc = EmailService(db)
+    for recipient in to_emails:
+        svc.send_raw(
+            to_email=recipient,
+            subject=subject,
+            body_html=body_html,
+            cc=cc_emails if cc_emails else None,
+            reply_to=from_email if from_email else None,
+        )
+
+    return {"message": f"Flyer sent to {len(to_emails)} recipient(s)"}
 
 
 # ── Product Reviews ────────────────────────────────────────────────────────────

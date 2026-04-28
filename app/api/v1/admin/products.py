@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
 from app.core.redis import redis_delete
-from app.models.product import Category, Product, ProductCategory, ProductImage, ProductVariant
+from app.models.product import Category, Product, ProductAsset, ProductCategory, ProductImage, ProductVariant
 from app.schemas.product import (
     BulkActionRequest,
     BulkGenerateRequest,
@@ -636,6 +636,98 @@ async def _process_and_upload_image(
             urls[f"{size_name}_webp"] = f"/media/{base_key}_{size_name}.webp"
 
     return urls
+
+
+# ---------------------------------------------------------------------------
+# Flyer upload for individual products
+# ---------------------------------------------------------------------------
+
+@router.post("/{product_id}/upload-flyer")
+async def upload_product_flyer(
+    product_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a PDF flyer for a product, replacing any existing one."""
+    import uuid as _uuid
+    import os
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    use_s3 = bool(settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY)
+
+    result = await db.execute(
+        select(Product).options(selectinload(Product.assets)).where(Product.id == product_id)
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    content = await file.read()
+    file_name = file.filename or "flyer.pdf"
+    asset_id = str(_uuid.uuid4())
+
+    if use_s3:
+        import boto3
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION,
+        )
+        bucket = settings.AWS_S3_BUCKET
+        cdn = settings.CDN_BASE_URL.rstrip("/") if settings.CDN_BASE_URL else f"https://{bucket}.s3.amazonaws.com"
+        key = f"flyers/{product_id}/{asset_id}/{file_name}"
+        s3.put_object(Bucket=bucket, Key=key, Body=content, ContentType="application/pdf")
+        url = f"{cdn}/{key}"
+    else:
+        local_dir = f"/app/media/flyers/{product_id}"
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = f"{local_dir}/{file_name}"
+        with open(local_path, "wb") as f_out:
+            f_out.write(content)
+        url = f"/media/flyers/{product_id}/{file_name}"
+
+    # Delete existing flyer asset, then create new one
+    for existing in [a for a in product.assets if a.asset_type == "flyer"]:
+        await db.delete(existing)
+    await db.flush()
+
+    new_asset = ProductAsset(
+        product_id=product.id,
+        asset_type="flyer",
+        url=url,
+        file_name=file_name,
+    )
+    db.add(new_asset)
+    await db.commit()
+    await db.refresh(new_asset)
+
+    return {"url": url, "file_name": file_name, "id": str(new_asset.id)}
+
+
+@router.delete("/{product_id}/flyer")
+async def delete_product_flyer(
+    product_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the flyer asset for a product."""
+    result = await db.execute(
+        select(Product).options(selectinload(Product.assets)).where(Product.id == product_id)
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    deleted = False
+    for existing in [a for a in product.assets if a.asset_type == "flyer"]:
+        await db.delete(existing)
+        deleted = True
+    await db.commit()
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No flyer to remove")
+    return {"message": "Flyer removed"}
 
 
 # ---------------------------------------------------------------------------

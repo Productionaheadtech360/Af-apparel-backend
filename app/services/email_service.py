@@ -82,6 +82,7 @@ class EmailService:
         body_text: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
+        reply_to: str | None = None,
     ) -> bool:
         """Send an ad-hoc email without requiring a DB template."""
         return self._send_via_resend(
@@ -91,6 +92,7 @@ class EmailService:
             body_text=body_text,
             cc=cc,
             bcc=bcc,
+            reply_to=reply_to,
         )
 
     def _send_via_resend(
@@ -101,6 +103,7 @@ class EmailService:
         body_text: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
+        reply_to: str | None = None,
     ) -> bool:
         if not settings.RESEND_API_KEY:
             logger.warning("RESEND_API_KEY not set — skipping email to %s", to_email)
@@ -126,6 +129,8 @@ class EmailService:
             params["cc"] = cc
         if bcc:
             params["bcc"] = bcc
+        if reply_to:
+            params["reply_to"] = [reply_to]
 
         try:
             result = resend.Emails.send(params)
