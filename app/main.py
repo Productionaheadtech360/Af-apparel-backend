@@ -380,6 +380,7 @@ from app.api.v1.admin import (  # noqa: E402
     reviews as admin_reviews,
     discount_groups as admin_discount_groups,
     discounts as admin_discounts,
+    users as admin_users,
 )
 
 _cors_origins = list({settings.FRONTEND_URL, *settings.allowed_origins_list} - {""})
@@ -418,6 +419,7 @@ app.include_router(admin_inventory.router, prefix=_V1)
 app.include_router(admin_reviews.router, prefix=_V1)
 app.include_router(admin_discount_groups.router, prefix=_V1)
 app.include_router(admin_discounts.router, prefix=_V1)
+app.include_router(admin_users.router, prefix=_V1)
 
 # Static files
 os.makedirs("/app/media", exist_ok=True)
