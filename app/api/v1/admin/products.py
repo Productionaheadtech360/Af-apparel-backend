@@ -82,13 +82,14 @@ async def create_product(payload: ProductCreate, db: AsyncSession = Depends(get_
     await db.commit()
 
     # Reload with all relationships eagerly — prevents MissingGreenletError when
-    # FastAPI serialises ProductDetail (images / variants / category_links).
+    # FastAPI serialises ProductDetail (images / variants / assets / category_links).
     result = await db.execute(
         select(Product)
         .where(Product.id == product.id)
         .options(
             selectinload(Product.variants),
             selectinload(Product.images),
+            selectinload(Product.assets),
             selectinload(Product.category_links)
             .selectinload(ProductCategory.category)
             .selectinload(Category.children),
@@ -111,6 +112,7 @@ async def update_product(
         .options(
             selectinload(Product.variants),
             selectinload(Product.images),
+            selectinload(Product.assets),
             selectinload(Product.category_links)
             .selectinload(ProductCategory.category)
             .selectinload(Category.children),
